@@ -1,0 +1,102 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    background-color: #f8fafc;
+    color: #1e293b;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #bfdbfe;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3b82f6;
+  }
+}
+
+@layer components {
+  .sidebar-link {
+    @apply flex items-center gap-3  px-4 py-2.5 rounded-lg text-blue-200 hover:bg-blue-700/50 hover:text-white transition-all duration-150 text-sm font-medium;
+  }
+
+  .sidebar-link.active {
+    @apply bg-blue-600 text-white shadow-md;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl shadow-sm border border-slate-100 p-5;
+  }
+
+  .page-title {
+    @apply text-2xl font-bold text-slate-800;
+  }
+
+  .section-title {
+    @apply text-lg font-semibold text-slate-700;
+  }
+}
+
+/* Smooth page transitions */
+.page-enter {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.page-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 200ms, transform 200ms;
+}
+
+/* Toast animations */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(100%); }
+}
+
+.toast-enter {
+  animation: toast-in 0.3s ease forwards;
+}
+
+.toast-exit {
+  animation: toast-out 0.3s ease forwards;
+}
+
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 8px;
+}

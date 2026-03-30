@@ -1,0 +1,32 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ai_english_exam
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/ai_english_exam?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: 123
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        #dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+  mvc:
+    problemdetails:
+      enabled: true
+
+app:
+  jwt:
+    secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+    expiration: 86400000
+
+logging:
+  level:
+    com.ai.englishsystem: DEBUG
+    org.springframework.security: INFO

@@ -1,0 +1,104 @@
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { authApi } from '../services/api';
+import { useToast } from '../context/ToastContext';
+import Button from '../components/common/Button';
+
+export default function RegisterPage() {
+  const [form, setForm] = useState({ username: '', email: '', password: '', confirmPassword: '' });
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+  const toast = useToast();
+
+  const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (form.password !== form.confirmPassword) {
+      toast.error('Passwords do not match.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await authApi.register({ username: form.username, email: form.email, password: form.password });
+      toast.success('Account created! Please sign in.');
+      navigate('/login');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Registration failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fields = [
+    { id: 'username', label: 'Username', type: 'text', placeholder: 'johndoe' },
+    { id: 'email', label: 'Email', type: 'email', placeholder: 'you@example.com' },
+    { id: 'password', label: 'Password', type: 'password', placeholder: '••••••••' },
+    { id: 'confirmPassword', label: 'Confirm Password', type: 'password', placeholder: '••••••••' },
+  ];
+
+  return (
+    <div className="min-h-screen grid lg:grid-cols-2">
+      {/* Left */}
+      <div className="hidden lg:flex flex-col justify-between bg-gradient-to-br from-blue-800 to-blue-600 p-12 text-white">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+          </div>
+          <span className="font-bold text-lg">AI English Tutor</span>
+        </div>
+        <div>
+          <h2 className="text-4xl font-bold leading-tight mb-4">Start your<br />English learning<br />journey today</h2>
+          <p className="text-blue-200 text-lg">Join thousands of students improving their English skills with AI-powered exams and feedback.</p>
+        </div>
+        <ul className="space-y-3">
+          {['Instant AI grading on writing & speaking', 'Detailed skill breakdown reports', 'Track your progress over time'].map((item) => (
+            <li key={item} className="flex items-center gap-2 text-blue-100 text-sm">
+              <svg className="w-5 h-5 text-blue-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              {item}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Right */}
+      <div className="flex items-center justify-center p-8 bg-slate-50">
+        <div className="w-full max-w-sm">
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold text-slate-800">Create an account</h1>
+            <p className="text-slate-500 mt-1 text-sm">Get started with your free student account</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {fields.map(({ id, label, type, placeholder }) => (
+              <div key={id}>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>
+                <input
+                  type={type}
+                  value={form[id]}
+                  onChange={set(id)}
+                  placeholder={placeholder}
+                  required
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                />
+              </div>
+            ))}
+            <Button type="submit" variant="primary" size="lg" loading={loading} className="w-full mt-2">
+              Create Account
+            </Button>
+          </form>
+
+          <p className="text-center text-sm text-slate-500 mt-6">
+            Already have an account?{' '}
+            <Link to="/login" className="text-blue-600 font-medium hover:underline">Sign in</Link>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
