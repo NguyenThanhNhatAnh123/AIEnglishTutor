@@ -30,6 +30,9 @@ public class Question {
     @Column(name = "question_type", length = 50)
     private String questionType;
 
+    @Column(name = "audio_url", length = 500)
+    private String audioUrl;
+
     @Column
     private Integer points;
 

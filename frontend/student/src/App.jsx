@@ -7,7 +7,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import Dashboard from './pages/Dashboard';
 import ExamList from './pages/ExamList';
-import ExamRoom from './pages/ExamRoom';
+import ExamPage from './pages/ExamPage';
 import ExamResult from './pages/ExamResult';
 import Profile from './pages/Profile';
 import SubmissionHistory from './pages/SubmissionHistory';
@@ -37,7 +37,7 @@ function AppRoutes() {
         path="/exam/:id"
         element={
           <RequireAuth>
-            <ExamRoom />
+            <ExamPage />
           </RequireAuth>
         }
       />

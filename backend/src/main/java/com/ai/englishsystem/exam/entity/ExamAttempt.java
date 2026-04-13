@@ -1,5 +1,6 @@
 package com.ai.englishsystem.exam.entity;
 
+import com.ai.englishsystem.student.entity.Student;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -18,11 +19,13 @@ public class ExamAttempt {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    @Column(name = "student_id", nullable = false)
-    private Integer studentId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "student_id", nullable = false)
+    private Student student;
 
-    @Column(name = "exam_id", nullable = false)
-    private Integer examId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "exam_id", nullable = false)
+    private Exam exam;
 
     @Column(name = "attempt_number")
     private Integer attemptNumber;

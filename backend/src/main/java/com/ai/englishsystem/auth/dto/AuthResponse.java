@@ -10,10 +10,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class AuthResponse {
-    // FIX: renamed from "token" → "accessToken" for frontend compatibility
+
     private String accessToken;
 
-    // FIX: @Builder.Default required — Lombok @Builder ignores Java field initializers
     @Builder.Default
     private String tokenType = "Bearer";
 

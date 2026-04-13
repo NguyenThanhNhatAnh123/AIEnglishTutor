@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState } from 'react';
 
 const AuthContext = createContext(null);
 
@@ -13,7 +13,10 @@ export function AuthProvider({ children }) {
   });
 
   const login = (authData) => {
-    if (authData?.token) localStorage.setItem('token', authData.token);
+    // FIX: backend trả "accessToken", không phải "token"
+    if (authData?.accessToken) {
+      localStorage.setItem('token', authData.accessToken);
+    }
     if (authData) {
       const u = {
         userId: authData.userId,

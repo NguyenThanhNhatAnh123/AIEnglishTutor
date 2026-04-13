@@ -36,7 +36,16 @@ export const studentApi = {
 
 export const examApi = {
   getAll: () => api.get('/exams'),
+  /** Teacher/admin only — full exam may include correct option flags */
   getById: (id) => api.get(`/exams/${id}`),
+};
+
+/** Student-safe exam taking (no correct answers in payload) */
+export const studentExamApi = {
+  start: (examId) => api.post(`/student/exams/${examId}/start`),
+  getExam: (examId) => api.get(`/student/exams/${examId}`),
+  saveAnswer: (body) => api.post('/student/answers', body),
+  submit: (submissionId) => api.post(`/student/submissions/${submissionId}/submit`),
 };
 
 export const submissionApi = {

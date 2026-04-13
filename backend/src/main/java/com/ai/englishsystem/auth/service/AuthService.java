@@ -33,8 +33,19 @@ public class AuthService {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new UnauthorizedException("Invalid email or password"));
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            throw new UnauthorizedException("Invalid email or password");
+        String storedHash = user.getPassword();
+        if (!passwordEncoder.matches(request.getPassword(), storedHash)) {
+            // One-time upgrade path for legacy plaintext passwords (not BCrypt-prefixed)
+            if (storedHash != null
+                    && !storedHash.startsWith("$2a$")
+                    && !storedHash.startsWith("$2b$")
+                    && !storedHash.startsWith("$2y$")
+                    && storedHash.equals(request.getPassword())) {
+                user.setPassword(passwordEncoder.encode(request.getPassword()));
+                userRepository.save(user);
+            } else {
+                throw new UnauthorizedException("Invalid email or password");
+            }
         }
 
         if (!"ACTIVE".equals(user.getStatus())) {

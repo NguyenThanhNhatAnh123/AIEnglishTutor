@@ -1,13 +1,9 @@
 package com.ai.englishsystem.submission.service;
 
-import com.ai.englishsystem.common.exception.BadRequestException;
-import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
-import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.repository.ExamRepository;
-import com.ai.englishsystem.student.entity.Student;
-import com.ai.englishsystem.student.repository.StudentRepository;
+import com.ai.englishsystem.exam.service.StudentExamService;
 import com.ai.englishsystem.submission.dto.StartSubmissionRequest;
 import com.ai.englishsystem.submission.dto.SubmissionListResponse;
 import com.ai.englishsystem.submission.dto.SubmissionResponse;
@@ -18,7 +14,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -28,66 +23,30 @@ public class SubmissionService {
 
     private final SubmissionRepository submissionRepository;
     private final ExamRepository examRepository;
-    private final StudentRepository studentRepository;
+    private final StudentExamService studentExamService;
 
     @Transactional
     public SubmissionResponse start(StartSubmissionRequest request) {
-        Integer userId = SecurityUtils.getCurrentUserId();
-        Student student = studentRepository.findByUser_Id(userId)
-                .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
-
-        Exam exam = examRepository.findById(request.getExamId())
-                .orElseThrow(() -> new NotFoundException("Exam", request.getExamId()));
-
-        if (!"ACTIVE".equals(exam.getStatus()) && !"IN_PROGRESS".equals(exam.getStatus())) {
-            throw new BadRequestException("Exam is not available for taking");
-        }
-
-        var existing = submissionRepository.findByExamAndStudentAndStatus(exam, student, "IN_PROGRESS");
-        if (existing.isPresent()) {
-            return toResponse(existing.get());
-        }
-
-        Submission submission = Submission.builder()
-                .exam(exam)
-                .student(student)
-                .startTime(LocalDateTime.now())
-                .status("IN_PROGRESS")
-                .build();
-
-        submission = submissionRepository.save(submission);
-        return toResponse(submission);
+        return studentExamService.startExam(request.getExamId());
     }
 
     @Transactional
     public SubmissionResponse submit(SubmitSubmissionRequest request) {
-        Integer userId = SecurityUtils.getCurrentUserId();
-        Student student = studentRepository.findByUser_Id(userId)
-                .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
-
-        Submission submission = submissionRepository.findById(request.getSubmissionId())
-                .orElseThrow(() -> new NotFoundException("Submission", request.getSubmissionId()));
-
-        if (!submission.getStudent().getId().equals(student.getId())) {
-            throw new ForbiddenException("Cannot submit another student's exam");
-        }
-
-        if (!"IN_PROGRESS".equals(submission.getStatus())) {
-            throw new BadRequestException("Submission is not in progress");
-        }
-
-        Exam exam = submission.getExam();
-        int durationMinutes = exam.getDurationMinutes() != null ? exam.getDurationMinutes() : 60;
-        LocalDateTime deadline = submission.getStartTime().plusMinutes(durationMinutes);
-        if (LocalDateTime.now().isAfter(deadline)) {
-            throw new BadRequestException("Exam time has expired");
-        }
-
-        submission.setSubmitTime(LocalDateTime.now());
-        submission.setStatus("SUBMITTED");
-        submission = submissionRepository.save(submission);
-
-        return toResponse(submission);
+        var graded = studentExamService.submitExam(request.getSubmissionId());
+        Submission persisted = submissionRepository.findWithAssociationsById(graded.getSubmissionId())
+                .orElse(null);
+        return SubmissionResponse.builder()
+                .id(graded.getSubmissionId())
+                .examId(graded.getExamId())
+                .studentId(graded.getStudentId())
+                .attemptId(persisted != null && persisted.getExamAttempt() != null
+                        ? persisted.getExamAttempt().getId() : null)
+                .durationMinutes(persisted != null && persisted.getExam() != null
+                        ? persisted.getExam().getDurationMinutes() : null)
+                .startTime(persisted != null ? persisted.getStartTime() : null)
+                .submitTime(graded.getSubmitTime())
+                .status(graded.getStatus())
+                .build();
     }
 
     @Transactional(readOnly = true)
@@ -106,20 +65,10 @@ public class SubmissionService {
                 .examTitle(s.getExam().getTitle())
                 .studentId(s.getStudent().getId())
                 .studentName(s.getStudent().getUser().getFullName())
-                .status(s.getStatus())
+                .status(s.getStatus().name())
                 .startTime(s.getStartTime())
                 .submitTime(s.getSubmitTime())
                 .build();
     }
 
-    private SubmissionResponse toResponse(Submission s) {
-        return SubmissionResponse.builder()
-                .id(s.getId())
-                .examId(s.getExam().getId())
-                .studentId(s.getStudent().getId())
-                .startTime(s.getStartTime())
-                .submitTime(s.getSubmitTime())
-                .status(s.getStatus())
-                .build();
-    }
 }

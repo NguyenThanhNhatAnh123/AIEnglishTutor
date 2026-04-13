@@ -14,12 +14,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * AI Scoring Service - evaluates writing and speaking submissions.
- * Production: Integrate with OpenAI API, Google Speech-to-Text, or similar services.
- * This implementation provides rule-based/mock scoring for demonstration.
+ * AI scoring (mock in production bootstrap; swap for real LLM / speech APIs later).
+ * Idempotent per answer: existing {@link AiResult} rows are reused.
  */
 @Service
 @RequiredArgsConstructor
@@ -29,26 +28,26 @@ public class AiScoringService {
     private final AnswerRepository answerRepository;
     private final AiResultRepository aiResultRepository;
 
-    /**
-     * Score writing essay: grammar, vocabulary, coherence, overall.
-     */
     @Transactional
     public AiScoreResponse scoreWriting(WritingScoreRequest request) {
         Answer answer = answerRepository.findById(request.getAnswerId())
                 .orElseThrow(() -> new NotFoundException("Answer", request.getAnswerId()));
+
+        var existingWriting = aiResultRepository.findByAnswer(answer);
+        if (existingWriting.isPresent()) {
+            return toAiScoreResponse(existingWriting.get());
+        }
 
         String text = request.getEssayText() != null ? request.getEssayText() : answer.getAnswerText();
         if (text == null || text.isBlank()) {
             throw new BadRequestException("No essay text to score");
         }
 
-        // Rule-based scoring (replace with OpenAI/LLM in production)
-        float grammarScore = scoreGrammar(text);
-        float vocabularyScore = scoreVocabulary(text);
-        float coherenceScore = scoreCoherence(text);
-        float overallScore = (grammarScore + vocabularyScore + coherenceScore) / 3;
-
-        String feedback = buildWritingFeedback(grammarScore, vocabularyScore, coherenceScore, overallScore);
+        float overall = mockOverall6To9();
+        float grammarScore = jitterAround(overall);
+        float vocabularyScore = jitterAround(overall);
+        float coherenceScore = jitterAround(overall);
+        String feedback = buildWritingFeedback(grammarScore, vocabularyScore, coherenceScore, overall);
 
         AiResult aiResult = AiResult.builder()
                 .answer(answer)
@@ -57,44 +56,34 @@ public class AiScoringService {
                 .fluencyScore(null)
                 .pronunciationScore(null)
                 .coherenceScore(coherenceScore)
-                .overallScore(overallScore)
+                .overallScore(overall)
                 .feedback(feedback)
                 .build();
 
         aiResult = aiResultRepository.save(aiResult);
-
-        return AiScoreResponse.builder()
-                .aiResultId(aiResult.getId())
-                .grammarScore(grammarScore)
-                .vocabularyScore(vocabularyScore)
-                .fluencyScore(null)
-                .pronunciationScore(null)
-                .coherenceScore(coherenceScore)
-                .overallScore(overallScore)
-                .feedback(feedback)
-                .build();
+        return toAiScoreResponse(aiResult);
     }
 
-    /**
-     * Score speaking: pronunciation, fluency, grammar.
-     */
     @Transactional
     public AiScoreResponse scoreSpeaking(SpeakingScoreRequest request) {
         Answer answer = answerRepository.findById(request.getAnswerId())
                 .orElseThrow(() -> new NotFoundException("Answer", request.getAnswerId()));
+
+        var existingSpeaking = aiResultRepository.findByAnswer(answer);
+        if (existingSpeaking.isPresent()) {
+            return toAiScoreResponse(existingSpeaking.get());
+        }
 
         String audioUrl = request.getAudioUrl() != null ? request.getAudioUrl() : answer.getAudioUrl();
         if (audioUrl == null || audioUrl.isBlank()) {
             throw new BadRequestException("No audio URL to score");
         }
 
-        // Mock scoring - production: use Speech-to-Text + pronunciation analysis API
-        float pronunciationScore = 5 + new Random().nextFloat() * 5;
-        float fluencyScore = 5 + new Random().nextFloat() * 5;
-        float grammarScore = 5 + new Random().nextFloat() * 5;
-        float overallScore = (pronunciationScore + fluencyScore + grammarScore) / 3;
-
-        String feedback = buildSpeakingFeedback(pronunciationScore, fluencyScore, grammarScore, overallScore);
+        float overall = mockOverall6To9();
+        float pronunciationScore = jitterAround(overall);
+        float fluencyScore = jitterAround(overall);
+        float grammarScore = jitterAround(overall);
+        String feedback = buildSpeakingFeedback(pronunciationScore, fluencyScore, grammarScore, overall);
 
         AiResult aiResult = AiResult.builder()
                 .answer(answer)
@@ -103,44 +92,40 @@ public class AiScoringService {
                 .fluencyScore(fluencyScore)
                 .pronunciationScore(pronunciationScore)
                 .coherenceScore(null)
-                .overallScore(overallScore)
+                .overallScore(overall)
                 .feedback(feedback)
                 .build();
 
         aiResult = aiResultRepository.save(aiResult);
+        return toAiScoreResponse(aiResult);
+    }
 
+    /** Mock band ~6–9 on a 0–10 scale (production: replace with model output). */
+    private static float mockOverall6To9() {
+        ThreadLocalRandom r = ThreadLocalRandom.current();
+        return 6f + r.nextFloat() * 3f;
+    }
+
+    private static float jitterAround(float center) {
+        float d = (ThreadLocalRandom.current().nextFloat() - 0.5f) * 1.2f;
+        return clamp10(center + d);
+    }
+
+    private static float clamp10(float v) {
+        return Math.min(10f, Math.max(0f, v));
+    }
+
+    private AiScoreResponse toAiScoreResponse(AiResult aiResult) {
         return AiScoreResponse.builder()
                 .aiResultId(aiResult.getId())
-                .grammarScore(grammarScore)
-                .vocabularyScore(null)
-                .fluencyScore(fluencyScore)
-                .pronunciationScore(pronunciationScore)
-                .coherenceScore(null)
-                .overallScore(overallScore)
-                .feedback(feedback)
+                .grammarScore(aiResult.getGrammarScore())
+                .vocabularyScore(aiResult.getVocabularyScore())
+                .fluencyScore(aiResult.getFluencyScore())
+                .pronunciationScore(aiResult.getPronunciationScore())
+                .coherenceScore(aiResult.getCoherenceScore())
+                .overallScore(aiResult.getOverallScore())
+                .feedback(aiResult.getFeedback())
                 .build();
-    }
-
-    private float scoreGrammar(String text) {
-        int wordCount = text.split("\\s+").length;
-        float base = 5f;
-        if (wordCount < 50) base = 4f;
-        else if (wordCount > 200) base = 8f;
-        else base = 5 + (wordCount - 50) * 0.02f;
-        return Math.min(10, Math.max(0, base + (new Random().nextFloat() - 0.5f) * 2));
-    }
-
-    private float scoreVocabulary(String text) {
-        String[] words = text.split("\\s+");
-        int unique = (int) java.util.Arrays.stream(words).distinct().count();
-        float diversity = words.length > 0 ? (float) unique / words.length : 0;
-        return Math.min(10, Math.max(0, 5 + diversity * 3 + (new Random().nextFloat() - 0.5f)));
-    }
-
-    private float scoreCoherence(String text) {
-        int sentences = text.split("[.!?]+").length;
-        float base = sentences >= 3 ? 6 : 4;
-        return Math.min(10, Math.max(0, base + (new Random().nextFloat() - 0.5f) * 2));
     }
 
     private String buildWritingFeedback(float g, float v, float c, float o) {

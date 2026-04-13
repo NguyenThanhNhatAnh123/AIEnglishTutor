@@ -1,4 +1,4 @@
-package com.ai.englishsystem.exam.dto;
+package com.ai.englishsystem.exam.dto.student;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -12,13 +12,12 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class QuestionResponse {
+public class StudentExamDetailResponse {
     private Integer id;
-    private Integer sectionId;
-    private String questionText;
-    private String questionType;
-    private String audioUrl;
-    private Integer points;
+    private String title;
+    private String description;
+    private Integer durationMinutes;
+    private String status;
     private LocalDateTime createdAt;
-    private List<QuestionOptionResponse> options;
+    private List<StudentExamSectionResponse> sections;
 }

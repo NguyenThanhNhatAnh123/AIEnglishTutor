@@ -36,7 +36,7 @@ public class ScoreService {
             }
         }
 
-        return scoreRepository.findBySubmission(submission)
+        return scoreRepository.findFirstBySubmissionOrderByIdAsc(submission)
                 .map(this::toResponse)
                 .orElseThrow(() -> new NotFoundException("Score not found for submission"));
     }

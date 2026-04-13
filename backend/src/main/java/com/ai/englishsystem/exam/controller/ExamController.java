@@ -27,9 +27,9 @@ public class ExamController {
         return ResponseEntity.ok(ApiResponse.success(examService.findAll()));
     }
 
-    // STUDENTS, TEACHERS and ADMINS can read a single exam
+    // Full exam payload may include correct MCQ keys — not exposed to students (use /api/student/exams/{id})
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('STUDENT', 'TEACHER', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<ApiResponse<ExamResponse>> getById(@PathVariable Integer id) {
         return ResponseEntity.ok(ApiResponse.success(examService.findById(id)));
     }

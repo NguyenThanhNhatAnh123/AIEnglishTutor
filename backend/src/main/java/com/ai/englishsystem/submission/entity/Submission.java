@@ -1,6 +1,7 @@
 package com.ai.englishsystem.submission.entity;
 
 import com.ai.englishsystem.exam.entity.Exam;
+import com.ai.englishsystem.exam.entity.ExamAttempt;
 import com.ai.englishsystem.student.entity.Student;
 import jakarta.persistence.*;
 import lombok.*;
@@ -30,15 +31,20 @@ public class Submission {
     @JoinColumn(name = "student_id", nullable = false)
     private Student student;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "attempt_id")
+    private ExamAttempt examAttempt;
+
     @Column(name = "start_time")
     private LocalDateTime startTime;
 
     @Column(name = "submit_time")
     private LocalDateTime submitTime;
 
-    @Column(length = 20)
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20, nullable = false)
     @Builder.Default
-    private String status = "IN_PROGRESS";
+    private SubmissionStatus status = SubmissionStatus.IN_PROGRESS;
 
     @OneToMany(mappedBy = "submission", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default

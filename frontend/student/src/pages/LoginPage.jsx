@@ -19,20 +19,26 @@ export default function LoginPage() {
     try {
       const res = await authApi.login({ email, password });
       const data = res.data?.data;
-      if (data?.token) {
-        const role = (data.role || '').toUpperCase();
-        if (role === 'TEACHER' || role === 'ADMIN') {
-          toast.error('Please use the Teacher Portal to log in.');
-          return;
-        }
-        login(data);
-        navigate('/dashboard');
-      } else {
+
+      if (!data?.accessToken) {
         toast.error('Invalid response from server.');
+        return;
       }
+
+      const role = (data.role || '').toUpperCase();
+
+      // FIX: Student portal chỉ cho STUDENT vào
+      if (role !== 'STUDENT') {
+        toast.error('Please use the Teacher Portal to log in.');
+        return;
+      }
+
+      login(data);
+      navigate('/dashboard');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Login failed. Please try again.');
     } finally {
+      // finally luôn chạy dù có return trong try — đảm bảo loading reset
       setLoading(false);
     }
   };

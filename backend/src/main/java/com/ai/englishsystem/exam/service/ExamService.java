@@ -216,6 +216,7 @@ public class ExamService {
                                         .sectionId(q.getSection().getId())
                                         .questionText(q.getQuestionText())
                                         .questionType(q.getQuestionType())
+                                        .audioUrl(q.getAudioUrl())
                                         .points(q.getPoints())
                                         .createdAt(q.getCreatedAt())
                                         .options(q.getOptions() != null
