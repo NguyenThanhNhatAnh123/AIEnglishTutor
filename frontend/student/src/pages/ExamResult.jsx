@@ -4,7 +4,6 @@ import { scoreApi } from '../services/api';
 import { PageLoader } from '../components/common/LoadingSpinner';
 
 function ScoreCircle({ value, max = 100, label, color }) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
   const colors = {
     blue: 'text-blue-600',
     green: 'text-green-600',

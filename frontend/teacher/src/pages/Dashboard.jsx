@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { classApi, examApi, submissionApi } from '../services/api';
+import { classApi, examApi } from '../services/api';
 import Layout from '../components/Layout';
 import { PageLoader } from '../components/common/LoadingSpinner';
 
@@ -85,12 +85,15 @@ export default function Dashboard() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Title</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Duration</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Manage</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {recentExams.length === 0 ? (
-                  <tr><td colSpan={3} className="text-center py-8 text-slate-400">No exams yet.</td></tr>
-                ) : recentExams.map((e) => (
+                  <tr><td colSpan={4} className="text-center py-8 text-slate-400">No exams yet.</td></tr>
+                ) : recentExams.map((e) => {
+                  const canManage = e.canManage !== false;
+                  return (
                   <tr key={e.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800">{e.title}</td>
                     <td className="px-4 py-3">
@@ -100,8 +103,19 @@ export default function Dashboard() {
                       }`}>{e.status}</span>
                     </td>
                     <td className="px-4 py-3 text-right text-slate-400">{e.durationMinutes} min</td>
+                    <td className="px-4 py-3 text-right text-xs">
+                      {canManage ? (
+                        <>
+                          <Link to="/exams" className="text-blue-600 hover:underline font-medium mr-2">Exams</Link>
+                          <Link to={`/questions?examId=${e.id}`} className="text-blue-600 hover:underline font-medium">Questions</Link>
+                        </>
+                      ) : (
+                        <span className="text-slate-400">View only</span>
+                      )}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

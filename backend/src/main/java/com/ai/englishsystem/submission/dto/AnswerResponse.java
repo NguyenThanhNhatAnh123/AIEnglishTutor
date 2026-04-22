@@ -13,4 +13,18 @@ public class AnswerResponse {
     private Integer id;
     private Integer submissionId;
     private Integer questionId;
+
+    /** Helps teachers route playback (e.g. SPEAKING). */
+    private String questionType;
+
+    private String answerText;
+    private Integer selectedOptionId;
+
+    private String speakingAudioUrl;
+
+    private Integer speakingDurationSeconds;
+
+    private String speakingFormat;
+
+    private String imageUrl;
 }

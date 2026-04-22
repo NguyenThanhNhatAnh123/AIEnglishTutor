@@ -1,9 +1,27 @@
 import axios from 'axios';
+import { API_BASE_URL, API_ORIGIN } from '../../../packages/utils/constants.js';
 
-const API_BASE = 'http://localhost:8080/api';
+/** Upload audio without forcing JSON Content-Type (multipart boundary). */
+async function uploadAudioMultipart(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${API_BASE_URL}/media/upload`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json.message || `Upload failed (${res.status})`);
+    err.response = { data: json, status: res.status };
+    throw err;
+  }
+  return { data: json };
+}
 
 const api = axios.create({
-  baseURL: API_BASE,
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -49,9 +67,13 @@ export const teacherApi = {
 
 export const classApi = {
   getAll: () => api.get('/classes'),
+  getById: (id) => api.get(`/classes/${id}`),
   create: (data) => api.post('/classes', data),
+  update: (id, data) => api.put(`/classes/${id}`, data),
   delete: (id) => api.delete(`/classes/${id}`),
   getStudents: (id) => api.get(`/classes/${id}/students`),
+  addStudent: (classId, studentId) => api.post(`/classes/${classId}/students/${studentId}`),
+  removeStudent: (classId, studentId) => api.delete(`/classes/${classId}/students/${studentId}`),
 };
 
 export const examApi = {
@@ -59,13 +81,28 @@ export const examApi = {
   getById: (id) => api.get(`/exams/${id}`),
   create: (data) => api.post('/exams', data),
   update: (id, data) => api.put(`/exams/${id}`, data),
-  patch: (id, data) => api.patch(`/exams/${id}`, data), // thêm để dùng cho Publish
+  patch: (id, data) => api.patch(`/exams/${id}`, data),
   delete: (id) => api.delete(`/exams/${id}`),
 };
 
+/** CRUD sections under an exam (aligned with student exam structure by section) */
+export const examSectionApi = {
+  list: (examId) => api.get(`/exams/${examId}/sections`),
+  create: (examId, data) => api.post(`/exams/${examId}/sections`, data),
+  update: (examId, sectionId, data) => api.put(`/exams/${examId}/sections/${sectionId}`, data),
+  delete: (examId, sectionId) => api.delete(`/exams/${examId}/sections/${sectionId}`),
+};
+
 export const questionApi = {
-  getAll: () => api.get('/questions'),
+  getAll: (examId) =>
+    api.get('/questions', { params: examId != null && examId !== '' ? { examId } : {} }),
   create: (data) => api.post('/questions', data),
+  update: (id, data) => api.put(`/questions/${id}`, data),
+  delete: (id) => api.delete(`/questions/${id}`),
+};
+
+export const mediaApi = {
+  uploadAudio: (file) => uploadAudioMultipart(file),
 };
 
 export const scoreApi = {
@@ -77,6 +114,11 @@ export const submissionApi = {
   getByExamId: (examId) => api.get('/submissions', { params: { examId } }),
   getById: (id) => api.get(`/submissions/${id}`),
   getAnswers: (id) => api.get(`/submissions/${id}/answers`),
+  delete: (id) => api.delete(`/submissions/${id}`),
+  downloadSpeaking: (submissionId, answerId) =>
+    api.get(`/submissions/${submissionId}/answers/${answerId}/speaking`, { responseType: 'blob' }),
 };
+
+export { API_ORIGIN };
 
 export default api;

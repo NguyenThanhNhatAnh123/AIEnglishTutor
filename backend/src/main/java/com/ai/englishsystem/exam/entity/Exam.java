@@ -1,6 +1,7 @@
 package com.ai.englishsystem.exam.entity;
 
 import com.ai.englishsystem.teacher.entity.Teacher;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -29,6 +30,7 @@ public class Exam {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "teacher_id", nullable = false)
+    @JsonIgnore
     private Teacher teacher;
 
     @Column(name = "duration_minutes")
@@ -43,6 +45,7 @@ public class Exam {
 
     @OneToMany(mappedBy = "exam", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
+    @JsonIgnore
     private List<ExamSection> sections = new ArrayList<>();
 
     @PrePersist

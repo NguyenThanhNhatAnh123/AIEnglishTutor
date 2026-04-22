@@ -1,19 +1,30 @@
 // ─── API ────────────────────────────────────────────────────────────────────
-export const API_BASE_URL = 'http://localhost:8080/api';
+export const API_ORIGIN = 'http://localhost:8080';
+export const API_BASE_URL = `${API_ORIGIN}/api`;
 
 // ─── App ports ───────────────────────────────────────────────────────────────
 export const STUDENT_PORT  = 5173;
 export const TEACHER_PORT  = 5174;
 
+// ─── Exam section skill types (must match backend ExamSectionType) ────────────
+export const SECTION_TYPES = {
+  READING: 'READING',
+  LISTENING: 'LISTENING',
+  WRITING: 'WRITING',
+  SPEAKING: 'SPEAKING',
+};
+
 // ─── Question types ───────────────────────────────────────────────────────────
 export const QUESTION_TYPES = {
   MULTIPLE_CHOICE: 'MULTIPLE_CHOICE',
+  LISTENING:       'LISTENING',
   WRITING:         'WRITING',
   SPEAKING:        'SPEAKING',
 };
 
 export const QUESTION_TYPE_LABELS = {
   MULTIPLE_CHOICE: 'Multiple Choice',
+  LISTENING:       'Listening',
   WRITING:         'Writing',
   SPEAKING:        'Speaking',
 };
@@ -25,11 +36,11 @@ export const EXAM_STATUS = {
   CLOSED: 'CLOSED',
 };
 
-// ─── Submission statuses ──────────────────────────────────────────────────────
+// ─── Submission statuses (must match backend SubmissionStatus enum) ───────────
 export const SUBMISSION_STATUS = {
-  IN_PROGRESS: 'IN_PROGRESS',
-  SUBMITTED:   'SUBMITTED',
-  GRADED:      'GRADED',
+  IN_PROGRESS:    'IN_PROGRESS',
+  SUBMITTED:      'SUBMITTED',
+  AUTO_SUBMITTED: 'AUTO_SUBMITTED',
 };
 
 // ─── User roles ───────────────────────────────────────────────────────────────

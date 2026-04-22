@@ -1,5 +1,6 @@
 package com.ai.englishsystem.exam.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -21,5 +22,11 @@ public class ExamResponse {
     private Integer durationMinutes;
     private String status;
     private LocalDateTime createdAt;
+    /** Populated in list responses when sections are eager-fetched (e.g. teacher's exams). */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Integer sectionCount;
+    /** Teacher portal: false when this exam is ACTIVE but owned by another teacher (view-only). */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean canManage;
     private List<ExamSectionResponse> sections;
 }

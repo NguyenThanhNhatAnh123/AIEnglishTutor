@@ -7,6 +7,7 @@ import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
 import com.ai.englishsystem.common.util.SecurityUtils;
+import com.ai.englishsystem.exam.dto.ExamResponse;
 import com.ai.englishsystem.exam.dto.student.*;
 import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.entity.ExamAttempt;
@@ -19,6 +20,7 @@ import com.ai.englishsystem.result.repository.ScoreRepository;
 import com.ai.englishsystem.student.entity.Student;
 import com.ai.englishsystem.student.repository.StudentRepository;
 import com.ai.englishsystem.submission.dto.StudentSubmitExamResponse;
+import com.ai.englishsystem.submission.dto.SubmitExamRequest;
 import com.ai.englishsystem.submission.dto.SubmissionResponse;
 import com.ai.englishsystem.submission.entity.Answer;
 import com.ai.englishsystem.submission.entity.Submission;
@@ -30,10 +32,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -49,6 +53,25 @@ public class StudentExamService {
     private final StudentRepository studentRepository;
     private final ScoreRepository scoreRepository;
     private final AiScoringService aiScoringService;
+
+    /**
+     * Returns only ACTIVE exams for students — never exposes DRAFT/CLOSED.
+     */
+    @Transactional(readOnly = true)
+    public List<ExamResponse> getActiveExams() {
+        return examRepository.findByStatusWithTeacher("ACTIVE").stream()
+                .map(exam -> ExamResponse.builder()
+                        .id(exam.getId())
+                        .title(exam.getTitle())
+                        .description(exam.getDescription())
+                        .teacherId(exam.getTeacher().getId())
+                        .teacherName(exam.getTeacher().getUser().getFullName())
+                        .durationMinutes(exam.getDurationMinutes())
+                        .status(exam.getStatus())
+                        .createdAt(exam.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+    }
 
     @Transactional
     public SubmissionResponse startExam(Integer examId) {
@@ -97,8 +120,24 @@ public class StudentExamService {
         return mapExamForStudent(exam);
     }
 
+    private static final int MAX_CLIENT_OVER_SERVER_SEC = 60;
+    private static final int MAX_SERVER_OVER_CLIENT_SEC = 300;
+    private static final double MIN_REQUIRED_COMPLETION_RATIO = 0.5d;
+
     @Transactional
     public StudentSubmitExamResponse submitExam(Integer submissionId) {
+        return submitExam(submissionId, (SubmitExamRequest) null);
+    }
+
+    @Transactional
+    public StudentSubmitExamResponse submitExam(Integer submissionId, Integer clientTimeSpentSeconds) {
+        return submitExam(submissionId, SubmitExamRequest.builder()
+                .clientTimeSpentSeconds(clientTimeSpentSeconds)
+                .build());
+    }
+
+    @Transactional
+    public StudentSubmitExamResponse submitExam(Integer submissionId, SubmitExamRequest submitRequest) {
         Student student = resolveCurrentStudent();
         Submission submission = submissionRepository.findWithAssociationsById(submissionId)
                 .orElseThrow(() -> new NotFoundException("Submission", submissionId));
@@ -113,9 +152,49 @@ public class StudentExamService {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime deadline = resolveDeadline(submission);
         boolean pastDeadline = now.isAfter(deadline);
+        Integer clientTimeSpentSeconds = submitRequest != null ? submitRequest.getClientTimeSpentSeconds() : null;
+
+        Submission finalSubmission = submission;
+        Exam exam = examRepository.findById(submission.getExam().getId())
+                .orElseThrow(() -> new NotFoundException("Exam", finalSubmission.getExam().getId()));
+        List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
+        CompletionStats completion = calculateCompletion(exam, answers);
+
+        if (!pastDeadline && completion.totalQuestions() > 0
+                && completion.completionRatio() < MIN_REQUIRED_COMPLETION_RATIO) {
+            int required = (int) Math.ceil(completion.totalQuestions() * MIN_REQUIRED_COMPLETION_RATIO);
+            throw new BadRequestException(
+                    "Bạn cần làm ít nhất 50% số câu trước khi nộp bài ("
+                            + completion.answeredQuestions() + "/" + completion.totalQuestions()
+                            + "). Tối thiểu cần " + required + " câu.");
+        }
 
         SubmissionStatus finalStatus = pastDeadline ? SubmissionStatus.AUTO_SUBMITTED : SubmissionStatus.SUBMITTED;
         submission.setSubmitTime(now);
+        submission.setEndTime(now);
+        submission.setAnsweredQuestions(completion.answeredQuestions());
+        submission.setTotalQuestions(completion.totalQuestions());
+        submission.setCompletionPercent(completion.completionPercent());
+
+        long serverSecs = 0;
+        if (submission.getStartTime() != null) {
+            serverSecs = Duration.between(submission.getStartTime(), now).getSeconds();
+        }
+        submission.setDuration((int) Math.min(serverSecs, Integer.MAX_VALUE));
+        submission.setClientReportedDuration(clientTimeSpentSeconds);
+        if (clientTimeSpentSeconds != null) {
+            if (clientTimeSpentSeconds < 0) {
+                throw new BadRequestException("Invalid reported exam time");
+            }
+            if (clientTimeSpentSeconds > serverSecs + MAX_CLIENT_OVER_SERVER_SEC) {
+                throw new BadRequestException("Reported time exceeds server session (possible tampering)");
+            }
+            if (serverSecs - clientTimeSpentSeconds > MAX_SERVER_OVER_CLIENT_SEC) {
+                throw new BadRequestException("Reported time is far below server session (possible tampering)");
+            }
+        }
+        applyClientAnalytics(submission, submitRequest);
+
         submission.setStatus(finalStatus);
         submission = submissionRepository.save(submission);
 
@@ -124,11 +203,6 @@ public class StudentExamService {
             attempt.setEndTime(now);
             examAttemptRepository.save(attempt);
         }
-
-        Submission finalSubmission = submission;
-        Exam exam = examRepository.findById(submission.getExam().getId())
-                .orElseThrow(() -> new NotFoundException("Exam", finalSubmission.getExam().getId()));
-        List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
 
         float[] mc = scoreMcqAndListening(exam, answers);
         Float mcScore = mc[1] > 0 ? (mc[0] / mc[1]) * 100f : null;
@@ -148,7 +222,12 @@ public class StudentExamService {
         score.setGradedAt(now);
         scoreRepository.save(score);
 
-        log.info("Graded submission {} status {} totalScore {}", submissionId, finalStatus, totalScore);
+        log.info("Graded submission {} status {} totalScore {} completion {}% suspicious {}",
+                submissionId,
+                finalStatus,
+                totalScore,
+                completion.completionPercent(),
+                submission.getSuspiciousEventCount());
 
         return StudentSubmitExamResponse.builder()
                 .submissionId(submission.getId())
@@ -190,7 +269,7 @@ public class StudentExamService {
     }
 
     private void assertExamAvailable(Exam exam) {
-        if (!"ACTIVE".equals(exam.getStatus()) && !"IN_PROGRESS".equals(exam.getStatus())) {
+        if (!"ACTIVE".equals(exam.getStatus())) {
             throw new BadRequestException("Exam is not available for taking");
         }
     }
@@ -242,6 +321,7 @@ public class StudentExamService {
         return StudentExamSectionResponse.builder()
                 .id(s.getId())
                 .name(s.getName())
+                .sectionType(s.getSectionType() != null ? s.getSectionType().name() : "READING")
                 .orderIndex(s.getOrderIndex())
                 .questions(questions)
                 .build();
@@ -265,7 +345,10 @@ public class StudentExamService {
                 .questionText(q.getQuestionText())
                 .questionType(q.getQuestionType())
                 .points(q.getPoints())
-                .audioUrl(q.getAudioUrl())
+                .listeningAudioUrl(q.getListeningAudioUrl())
+                .minWords(q.getMinWords())
+                .maxWords(q.getMaxWords())
+                .transcript(q.getTranscript())
                 .createdAt(q.getCreatedAt())
                 .options(options)
                 .build();
@@ -282,6 +365,83 @@ public class StudentExamService {
     private static List<Question> questionsOf(ExamSection sec) {
         List<Question> q = sec.getQuestions();
         return q != null ? q : List.of();
+    }
+
+    private CompletionStats calculateCompletion(Exam exam, List<Answer> answers) {
+        int total = 0;
+        int answered = 0;
+        for (ExamSection section : sectionsOf(exam)) {
+            for (Question question : questionsOf(section)) {
+                total++;
+                if (isAnswered(question, findAnswer(answers, question.getId()))) {
+                    answered++;
+                }
+            }
+        }
+        int percent = total <= 0 ? 0 : (int) Math.round((answered * 100d) / total);
+        double ratio = total <= 0 ? 1d : answered / (double) total;
+        return new CompletionStats(answered, total, percent, ratio);
+    }
+
+    private static boolean isAnswered(Question question, Answer answer) {
+        if (question == null || answer == null) {
+            return false;
+        }
+        String type = normalizeType(question.getQuestionType());
+        return switch (type) {
+            case "MULTIPLE_CHOICE", "LISTENING" -> answer.getSelectedOptionId() != null;
+            case "WRITING" -> hasText(answer.getAnswerText());
+            case "SPEAKING" -> hasText(answer.getSpeakingAudioUrl());
+            default -> answer.getSelectedOptionId() != null
+                    || hasText(answer.getAnswerText())
+                    || hasText(answer.getSpeakingAudioUrl());
+        };
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private void applyClientAnalytics(Submission submission, SubmitExamRequest submitRequest) {
+        int tabSwitchCount = nonNegative(submitRequest != null ? submitRequest.getTabSwitchCount() : null);
+        int focusLossCount = nonNegative(submitRequest != null ? submitRequest.getFocusLossCount() : null);
+        int copyPasteCount = nonNegative(submitRequest != null ? submitRequest.getCopyPasteCount() : null);
+        int suspiciousFromClient = nonNegative(submitRequest != null ? submitRequest.getSuspiciousEventCount() : null);
+        int suspiciousBySum = tabSwitchCount + focusLossCount + copyPasteCount;
+        int suspiciousEventCount = Math.max(suspiciousFromClient, suspiciousBySum);
+
+        submission.setTabSwitchCount(tabSwitchCount);
+        submission.setFocusLossCount(focusLossCount);
+        submission.setCopyPasteCount(copyPasteCount);
+        submission.setSuspiciousEventCount(suspiciousEventCount);
+        submission.setDeviceType(normalizeDeviceType(submitRequest != null ? submitRequest.getDeviceType() : null));
+        submission.setDeviceLabel(trimToLength(submitRequest != null ? submitRequest.getDeviceLabel() : null, 255));
+    }
+
+    private static int nonNegative(Integer value) {
+        return value == null ? 0 : Math.max(0, value);
+    }
+
+    private static String normalizeDeviceType(String deviceType) {
+        if (deviceType == null || deviceType.isBlank()) {
+            return "UNKNOWN";
+        }
+        String normalized = deviceType.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "DESKTOP", "MOBILE", "TABLET" -> normalized;
+            default -> "UNKNOWN";
+        };
+    }
+
+    private static String trimToLength(String value, int maxLength) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
     }
 
     private float[] scoreMcqAndListening(Exam exam, List<Answer> answers) {
@@ -339,14 +499,15 @@ public class StudentExamService {
                     continue;
                 }
                 Answer a = findAnswer(answers, q.getId());
-                if (a == null || a.getAudioUrl() == null || a.getAudioUrl().isBlank()) {
+                String speakingRef = a != null ? a.getSpeakingAudioUrl() : null;
+                if (a == null || speakingRef == null || speakingRef.isBlank()) {
                     parts.add(0f);
                     continue;
                 }
                 try {
                     var ai = aiScoringService.scoreSpeaking(SpeakingScoreRequest.builder()
                             .answerId(a.getId())
-                            .audioUrl(a.getAudioUrl())
+                            .audioUrl(speakingRef)
                             .build());
                     parts.add(ai.getOverallScore() != null ? ai.getOverallScore() * 10f : 0f);
                 } catch (Exception e) {
@@ -397,5 +558,35 @@ public class StudentExamService {
 
     private static boolean isMcqOrListening(String type) {
         return "MULTIPLE_CHOICE".equals(type) || "LISTENING".equals(type);
+    }
+
+    private static final class CompletionStats {
+        private final int answeredQuestions;
+        private final int totalQuestions;
+        private final int completionPercent;
+        private final double completionRatio;
+
+        private CompletionStats(int answeredQuestions, int totalQuestions, int completionPercent, double completionRatio) {
+            this.answeredQuestions = answeredQuestions;
+            this.totalQuestions = totalQuestions;
+            this.completionPercent = completionPercent;
+            this.completionRatio = completionRatio;
+        }
+
+        private int answeredQuestions() {
+            return answeredQuestions;
+        }
+
+        private int totalQuestions() {
+            return totalQuestions;
+        }
+
+        private int completionPercent() {
+            return completionPercent;
+        }
+
+        private double completionRatio() {
+            return completionRatio;
+        }
     }
 }

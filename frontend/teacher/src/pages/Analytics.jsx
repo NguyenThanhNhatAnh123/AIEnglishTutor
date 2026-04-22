@@ -35,6 +35,8 @@ export default function Analytics() {
   const [chartData, setChartData] = useState([]);
   const [totalSubmissions, setTotalSubmissions] = useState(0);
   const [avgScore, setAvgScore] = useState(null);
+  const [suspiciousEvents, setSuspiciousEvents] = useState(0);
+  const [flaggedSubmissions, setFlaggedSubmissions] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -45,6 +47,8 @@ export default function Analytics() {
 
         // Fetch submissions and scores per exam
         let allScores = [];
+        let suspiciousTotal = 0;
+        let flaggedTotal = 0;
         const cd = [];
 
         await Promise.all(
@@ -52,7 +56,12 @@ export default function Analytics() {
             try {
               const subRes = await submissionApi.getByExamId(exam.id);
               const subs = subRes.data?.data || [];
-              const submitted = subs.filter((s) => s.status === 'SUBMITTED' || s.status === 'GRADED');
+              const submitted = subs.filter((s) => s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED');
+              submitted.forEach((s) => {
+                const suspicious = Number(s.suspiciousEventCount || 0);
+                suspiciousTotal += suspicious;
+                if (suspicious > 0) flaggedTotal += 1;
+              });
 
               const scores = [];
               await Promise.all(
@@ -61,7 +70,9 @@ export default function Analytics() {
                     const sRes = await scoreApi.getBySubmissionId(s.id);
                     const sc = sRes.data?.data?.totalScore;
                     if (sc != null) scores.push(sc);
-                  } catch {}
+                  } catch {
+                    return null;
+                  }
                 })
               );
 
@@ -70,12 +81,16 @@ export default function Analytics() {
                 cd.push({ label: exam.title, avg, count: scores.length });
                 allScores = [...allScores, ...scores];
               }
-            } catch {}
+            } catch {
+              return null;
+            }
           })
         );
 
         setChartData(cd.sort((a, b) => b.avg - a.avg));
         setTotalSubmissions(allScores.length);
+        setSuspiciousEvents(suspiciousTotal);
+        setFlaggedSubmissions(flaggedTotal);
         if (allScores.length > 0) {
           setAvgScore((allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(1));
         }
@@ -89,6 +104,8 @@ export default function Analytics() {
     { label: 'Active Exams', value: exams.filter((e) => e.status === 'ACTIVE').length, color: 'bg-green-50 text-green-600' },
     { label: 'Total Graded', value: totalSubmissions, color: 'bg-purple-50 text-purple-600' },
     { label: 'Avg Score', value: avgScore ?? '—', color: 'bg-amber-50 text-amber-600' },
+    { label: 'Flagged Subs', value: flaggedSubmissions, color: 'bg-rose-50 text-rose-600' },
+    { label: 'Suspicious Events', value: suspiciousEvents, color: 'bg-orange-50 text-orange-600' },
   ];
 
   if (loading) return <Layout><PageLoader /></Layout>;
@@ -103,7 +120,7 @@ export default function Analytics() {
         </div>
 
         {/* KPI cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
           {kpis.map((k) => (
             <div key={k.label} className="card text-center">
               <p className={`text-3xl font-bold ${k.color.split(' ')[1]}`}>{k.value}</p>

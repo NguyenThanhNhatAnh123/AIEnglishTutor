@@ -1,13 +1,18 @@
 package com.ai.englishsystem.submission.controller;
 
 import com.ai.englishsystem.common.dto.ApiResponse;
+import com.ai.englishsystem.submission.dto.AnswerResponse;
 import com.ai.englishsystem.submission.dto.StartSubmissionRequest;
 import com.ai.englishsystem.submission.dto.SubmissionListResponse;
 import com.ai.englishsystem.submission.dto.SubmissionResponse;
 import com.ai.englishsystem.submission.dto.SubmitSubmissionRequest;
+import com.ai.englishsystem.submission.service.AnswerService;
 import com.ai.englishsystem.submission.service.SubmissionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -20,11 +25,51 @@ import java.util.List;
 public class SubmissionController {
 
     private final SubmissionService submissionService;
+    private final AnswerService answerService;
 
+    /** Teacher/Admin: list submissions for a given exam */
     @GetMapping
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<ApiResponse<List<SubmissionListResponse>>> listByExam(@RequestParam Integer examId) {
         List<SubmissionListResponse> list = submissionService.listByExam(examId);
+        return ResponseEntity.ok(ApiResponse.success(list));
+    }
+
+    /** Teacher/Admin: saved answers (e.g. speaking audio URLs) for review. */
+    @GetMapping("/{submissionId}/answers")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<List<AnswerResponse>>> answersForSubmission(@PathVariable Integer submissionId) {
+        List<AnswerResponse> list = answerService.getAnswersForTeacher(submissionId);
+        return ResponseEntity.ok(ApiResponse.success(list));
+    }
+
+    /** Teacher/Admin: download normalized speaking MP3 (requires exam ownership). */
+    @GetMapping("/{submissionId}/answers/{answerId}/speaking")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<Resource> downloadSpeaking(
+            @PathVariable Integer submissionId,
+            @PathVariable Integer answerId) {
+        Resource resource = submissionService.loadSpeakingAudioResource(submissionId, answerId);
+        String filename = submissionService.speakingDownloadFilename(answerId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("audio/mpeg"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body(resource);
+    }
+
+    /** Teacher/Admin: delete submission and remove speaking files from disk. */
+    @DeleteMapping("/{submissionId}")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<String>> deleteSubmission(@PathVariable Integer submissionId) {
+        submissionService.deleteSubmission(submissionId);
+        return ResponseEntity.ok(ApiResponse.success("Submission deleted", "ok"));
+    }
+
+    /** Student: get own submission history */
+    @GetMapping("/my")
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<ApiResponse<List<SubmissionListResponse>>> mySubmissions() {
+        List<SubmissionListResponse> list = submissionService.listMySubmissions();
         return ResponseEntity.ok(ApiResponse.success(list));
     }
 

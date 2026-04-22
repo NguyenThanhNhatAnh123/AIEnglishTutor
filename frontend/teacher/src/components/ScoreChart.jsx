@@ -6,6 +6,7 @@ export default function ScoreChart({ submissionId }) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset local display state when key prop is cleared
     if (!submissionId) {
       setScore(null);
       return;

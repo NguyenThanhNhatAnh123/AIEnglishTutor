@@ -1,9 +1,8 @@
 import axios from 'axios';
-
-const API_BASE = 'http://localhost:8080/api';
+import { API_BASE_URL, API_ORIGIN } from '../../../packages/utils/constants.js';
 
 const api = axios.create({
-  baseURL: API_BASE,
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -34,37 +33,52 @@ export const studentApi = {
   getMe: () => api.get('/students/me'),
 };
 
-export const examApi = {
-  getAll: () => api.get('/exams'),
-  /** Teacher/admin only — full exam may include correct option flags */
-  getById: (id) => api.get(`/exams/${id}`),
-};
-
-/** Student-safe exam taking (no correct answers in payload) */
+/** Student-safe exam APIs (no correct answers, only ACTIVE exams) */
 export const studentExamApi = {
+  /** Returns only ACTIVE exams — students never see DRAFT/CLOSED */
+  getActiveExams: () => api.get('/student/exams'),
   start: (examId) => api.post(`/student/exams/${examId}/start`),
   getExam: (examId) => api.get(`/student/exams/${examId}`),
   saveAnswer: (body) => api.post('/student/answers', body),
-  submit: (submissionId) => api.post(`/student/submissions/${submissionId}/submit`),
+  submit: (submissionId, body) =>
+    api.post(`/student/submissions/${submissionId}/submit`, body ?? {}),
+  /** Load saved answers for exam resume */
+  getAnswers: (submissionId) => api.get(`/student/submissions/${submissionId}/answers`),
 };
 
 export const submissionApi = {
-  start: (data) => api.post('/submissions/start', data),
-  submit: (data) => api.post('/submissions/submit', data),
+  /** Student's own submission history */
   getMy: () => api.get('/submissions/my'),
-};
-
-export const answerApi = {
-  create: (data) => api.post('/answers', data),
 };
 
 export const scoreApi = {
   getBySubmissionId: (id) => api.get(`/scores/${id}`),
 };
 
-export const aiApi = {
-  scoreWriting: (data) => api.post('/ai/score-writing', data),
-  scoreSpeaking: (data) => api.post('/ai/score-speaking', data),
+/** Media upload (audio recording) */
+export const mediaApi = {
+  upload: (file) => {
+    const formData = new FormData();
+    formData.append('file', file, file.name || 'recording.webm');
+    return api.post('/media/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
+
+/** Speaking answers → uploads/audio/speaking/ (student only) */
+export const speakingApi = {
+  upload: (blob, submissionId, questionId) => {
+    const formData = new FormData();
+    formData.append('file', blob, blob.type?.includes('webm') ? 'recording.webm' : 'recording.dat');
+    formData.append('submissionId', String(submissionId));
+    formData.append('questionId', String(questionId));
+    return api.post('/speaking/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
+export { API_ORIGIN };
 
 export default api;

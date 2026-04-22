@@ -24,5 +24,16 @@ public class QuestionRequest {
 
     private Integer points;
 
+    /** Listening prompt audio, e.g. {@code /uploads/audio/listening/clips/q1.mp3} */
+    private String listeningAudioUrl;
+
+    private String transcript;
+
+    /** Required for WRITING questions */
+    private Integer minWords;
+
+    /** Required for WRITING questions */
+    private Integer maxWords;
+
     private List<QuestionOptionRequest> options;
 }

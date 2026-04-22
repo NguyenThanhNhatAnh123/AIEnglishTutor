@@ -4,18 +4,26 @@ import { submissionApi } from '../services/api';
 import Badge from '../components/common/Badge';
 import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
+import { useToast } from '../context/ToastContext';
 
 export default function SubmissionHistory() {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
+  const toast = useToast();
 
   useEffect(() => {
     submissionApi.getMy()
       .then((r) => setSubmissions(r.data?.data || []))
-      .catch(() => setSubmissions([]))
+      .catch((err) => {
+        setSubmissions([]);
+        const msg = err.response?.data?.message || 'Failed to load submissions.';
+        setError(msg);
+        toast.error(msg);
+      })
       .finally(() => setLoading(false));
-  }, []);
+  }, [toast]);
 
   const filtered = submissions.filter((s) => {
     const name = (s.examTitle || `Exam #${s.examId}`).toLowerCase();
@@ -23,6 +31,23 @@ export default function SubmissionHistory() {
   });
 
   if (loading) return <PageLoader />;
+
+  if (error) {
+    return (
+      <EmptyState
+        title="Could not load submissions"
+        description={error}
+        action={
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition"
+          >
+            Retry
+          </button>
+        }
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -33,10 +58,12 @@ export default function SubmissionHistory() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
+            id="submission-search"
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by exam name..."
+            aria-label="Search submissions"
             className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -81,25 +108,32 @@ export default function SubmissionHistory() {
                       <Badge status={s.status} label={s.status} />
                     </td>
                     <td className="px-4 py-3 text-slate-400">
-                      {s.submitTime ? new Date(s.submitTime).toLocaleString() : '—'}
+                      {s.submitTime ? new Date(s.submitTime).toLocaleString() : '\u2014'}
                     </td>
                     <td className="px-4 py-3 text-center">
                       {s.totalScore != null ? (
-                        <span className="font-bold text-blue-700">{s.totalScore}</span>
+                        <span className="font-bold text-blue-700">{Math.round(s.totalScore * 10) / 10}</span>
                       ) : (
                         <span className="text-slate-300 text-xs">Pending</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      {(s.status === 'GRADED' || s.status === 'SUBMITTED') ? (
+                      {(s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED') ? (
                         <Link
                           to={`/result/${s.id}`}
                           className="text-xs text-blue-600 font-semibold hover:underline"
                         >
-                          View →
+                          View &rarr;
+                        </Link>
+                      ) : s.status === 'IN_PROGRESS' ? (
+                        <Link
+                          to={`/exam/${s.examId}`}
+                          className="text-xs text-amber-600 font-semibold hover:underline"
+                        >
+                          Resume &rarr;
                         </Link>
                       ) : (
-                        <span className="text-xs text-slate-300">—</span>
+                        <span className="text-xs text-slate-300">&mdash;</span>
                       )}
                     </td>
                   </tr>

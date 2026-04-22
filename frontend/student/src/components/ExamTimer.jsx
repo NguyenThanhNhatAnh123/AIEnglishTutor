@@ -8,8 +8,9 @@ function formatTime(totalSeconds) {
 
 /**
  * Countdown until endTimeMs (epoch milliseconds). Calls onExpire once when time reaches zero.
+ * Optional onTick(secondsLeft) for parent UI (e.g. disable audio).
  */
-export default function ExamTimer({ endTimeMs, onExpire, className = '' }) {
+export default function ExamTimer({ endTimeMs, onExpire, onTick, className = '' }) {
   const [secondsLeft, setSecondsLeft] = useState(0);
   const expiredRef = useRef(false);
 
@@ -29,6 +30,7 @@ export default function ExamTimer({ endTimeMs, onExpire, className = '' }) {
     const tick = () => {
       const next = Math.max(0, Math.floor((endTimeMs - Date.now()) / 1000));
       setSecondsLeft(next);
+      onTick?.(next);
       if (next <= 0) {
         stableOnExpire();
       }
@@ -37,7 +39,7 @@ export default function ExamTimer({ endTimeMs, onExpire, className = '' }) {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [endTimeMs, stableOnExpire]);
+  }, [endTimeMs, stableOnExpire, onTick]);
 
   if (endTimeMs == null) return null;
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { examApi, submissionApi } from '../services/api';
+import { studentExamApi, submissionApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import Badge from '../components/common/Badge';
 import { PageLoader } from '../components/common/LoadingSpinner';
@@ -27,7 +27,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      examApi.getAll().then((r) => r.data?.data || []),
+      studentExamApi.getActiveExams().then((r) => r.data?.data || []),
       submissionApi.getMy().then((r) => r.data?.data || []).catch(() => []),
     ])
       .then(([e, s]) => { setExams(e); setSubmissions(s); })
@@ -37,23 +37,25 @@ export default function Dashboard() {
 
   if (loading) return <PageLoader />;
 
-  const completed = submissions.filter((s) => s.status === 'SUBMITTED' || s.status === 'GRADED').length;
-  const pending = exams.filter((e) => e.status === 'ACTIVE').length - completed;
-  const recentExams = exams.filter((e) => e.status === 'ACTIVE').slice(0, 6);
+  const completed = submissions.filter(
+    (s) => s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED'
+  ).length;
+  const pending = Math.max(0, exams.length - completed);
+  const recentExams = exams.slice(0, 6);
 
   return (
     <div className="space-y-6">
       {/* Welcome banner */}
       <div className="rounded-2xl bg-gradient-to-r from-blue-700 to-blue-500 p-6 text-white">
         <p className="text-blue-200 text-sm font-medium uppercase tracking-wider mb-1">Welcome back,</p>
-        <h2 className="text-2xl font-bold">{user?.username || 'Student'} 👋</h2>
+        <h2 className="text-2xl font-bold">{user?.username || 'Student'} &#128075;</h2>
         <p className="text-blue-100 mt-1 text-sm">Ready to practice your English today?</p>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard
-          label="Total Exams"
+          label="Available Exams"
           value={exams.length}
           color="bg-blue-50 text-blue-600"
           icon={
@@ -75,7 +77,7 @@ export default function Dashboard() {
         />
         <StatCard
           label="Pending"
-          value={Math.max(0, pending)}
+          value={pending}
           color="bg-amber-50 text-amber-600"
           icon={
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -91,7 +93,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between mb-4">
           <h3 className="section-title">Available Exams</h3>
           <Link to="/exams" className="text-sm text-blue-600 hover:underline font-medium">
-            View all →
+            View all &rarr;
           </Link>
         </div>
         {recentExams.length === 0 ? (

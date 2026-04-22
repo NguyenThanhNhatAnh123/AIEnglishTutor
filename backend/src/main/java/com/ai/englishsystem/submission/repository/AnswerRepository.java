@@ -19,4 +19,14 @@ public interface AnswerRepository extends JpaRepository<Answer, Integer> {
     List<Answer> findBySubmissionFetchQuestion(@Param("sub") Submission submission);
 
     Optional<Answer> findBySubmissionAndQuestion(Submission submission, Question question);
+
+    @Query("""
+            SELECT DISTINCT a FROM Answer a
+            JOIN FETCH a.submission s
+            JOIN FETCH s.exam e
+            JOIN FETCH e.teacher t
+            JOIN FETCH t.user
+            WHERE a.id = :id
+            """)
+    Optional<Answer> findWithSubmissionGraphById(@Param("id") Integer id);
 }

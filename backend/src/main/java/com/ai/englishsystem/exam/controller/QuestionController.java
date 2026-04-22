@@ -7,6 +7,7 @@ import com.ai.englishsystem.exam.service.QuestionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,15 +20,32 @@ public class QuestionController {
     private final QuestionService questionService;
 
     @GetMapping
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<List<QuestionResponse>>> getAll() {
-        return ResponseEntity.ok(ApiResponse.success(questionService.findAll()));
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<List<QuestionResponse>>> getAll(
+            @RequestParam(required = false) Integer examId) {
+        return ResponseEntity.ok(ApiResponse.success(questionService.findAll(examId)));
     }
 
     @PostMapping
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<ApiResponse<QuestionResponse>> create(@Valid @RequestBody QuestionRequest request) {
         QuestionResponse response = questionService.create(request);
         return ResponseEntity.ok(ApiResponse.success("Question created", response));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<QuestionResponse>> update(
+            @PathVariable Integer id,
+            @RequestBody QuestionRequest request) {
+        QuestionResponse response = questionService.update(id, request);
+        return ResponseEntity.ok(ApiResponse.success("Question updated", response));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<Void> delete(@PathVariable Integer id) {
+        questionService.delete(id);
+        return ResponseEntity.noContent().build();
     }
 }

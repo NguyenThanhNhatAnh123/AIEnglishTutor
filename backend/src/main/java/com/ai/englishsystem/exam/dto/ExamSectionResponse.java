@@ -14,6 +14,7 @@ import java.util.List;
 public class ExamSectionResponse {
     private Integer id;
     private String name;
+    private String sectionType;
     private Integer orderIndex;
     private List<QuestionResponse> questions;
 }

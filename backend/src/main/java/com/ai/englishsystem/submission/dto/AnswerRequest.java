@@ -21,7 +21,12 @@ public class AnswerRequest {
 
     private Integer selectedOptionId;
 
-    private String audioUrl;
+    /** Public path from POST /api/speaking/upload (always mp3 after processing). */
+    private String speakingAudioUrl;
+
+    private Integer speakingDurationSeconds;
+
+    private String speakingFormat;
 
     private String imageUrl;
 }

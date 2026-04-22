@@ -18,7 +18,13 @@ public class StudentExamQuestionResponse {
     private String questionText;
     private String questionType;
     private Integer points;
-    private String audioUrl;
+    private String listeningAudioUrl;
+
+    private Integer minWords;
+    private Integer maxWords;
+
+    private String transcript;
+
     private LocalDateTime createdAt;
     private List<StudentExamOptionResponse> options;
 }

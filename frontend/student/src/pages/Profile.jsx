@@ -42,9 +42,9 @@ export default function Profile() {
         </div>
         <div className="card text-center">
           <p className="text-2xl font-bold text-green-600">
-            {submissions.filter((s) => s.status === 'GRADED').length}
+            {submissions.filter((s) => s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED').length}
           </p>
-          <p className="text-xs text-slate-400 mt-1">Graded</p>
+          <p className="text-xs text-slate-400 mt-1">Completed</p>
         </div>
         <div className="card text-center">
           <p className="text-2xl font-bold text-amber-600">

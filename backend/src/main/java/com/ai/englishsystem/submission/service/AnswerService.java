@@ -1,5 +1,8 @@
 package com.ai.englishsystem.submission.service;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
@@ -70,16 +73,14 @@ public class AnswerService {
                     .question(question)
                     .answerText(request.getAnswerText())
                     .selectedOptionId(request.getSelectedOptionId())
-                    .audioUrl(request.getAudioUrl())
+                    .speakingAudioUrl(request.getSpeakingAudioUrl())
+                    .speakingDurationSeconds(request.getSpeakingDurationSeconds())
+                    .speakingFormat(request.getSpeakingFormat())
                     .imageUrl(request.getImageUrl())
                     .build();
         }
         answer = answerRepository.save(answer);
-        return AnswerResponse.builder()
-                .id(answer.getId())
-                .submissionId(answer.getSubmission().getId())
-                .questionId(answer.getQuestion().getId())
-                .build();
+        return toResponse(answer);
     }
 
     private boolean questionBelongsToExam(Question question, com.ai.englishsystem.exam.entity.Exam exam) {
@@ -91,12 +92,12 @@ public class AnswerService {
         String type = question.getQuestionType() == null ? "" : question.getQuestionType().trim().toUpperCase();
         boolean hasMc = request.getSelectedOptionId() != null;
         boolean hasText = request.getAnswerText() != null && !request.getAnswerText().isBlank();
-        boolean hasAudio = request.getAudioUrl() != null && !request.getAudioUrl().isBlank();
+        boolean hasSpeaking = request.getSpeakingAudioUrl() != null && !request.getSpeakingAudioUrl().isBlank();
 
         switch (type) {
             case "MULTIPLE_CHOICE":
             case "LISTENING":
-                if (hasText || hasAudio) {
+                if (hasText || hasSpeaking) {
                     throw new BadRequestException("Use selectedOptionId for this question type");
                 }
                 break;
@@ -107,7 +108,7 @@ public class AnswerService {
                 break;
             case "SPEAKING":
                 if (hasMc) {
-                    throw new BadRequestException("Use audioUrl for speaking questions");
+                    throw new BadRequestException("Use speakingAudioUrl for speaking questions");
                 }
                 break;
             default:
@@ -126,11 +127,79 @@ public class AnswerService {
         if (request.getSelectedOptionId() != null) {
             answer.setSelectedOptionId(request.getSelectedOptionId());
         }
-        if (request.getAudioUrl() != null) {
-            answer.setAudioUrl(request.getAudioUrl());
+        if (request.getSpeakingAudioUrl() != null) {
+            answer.setSpeakingAudioUrl(request.getSpeakingAudioUrl());
+        }
+        if (request.getSpeakingDurationSeconds() != null) {
+            answer.setSpeakingDurationSeconds(request.getSpeakingDurationSeconds());
+        }
+        if (request.getSpeakingFormat() != null) {
+            answer.setSpeakingFormat(request.getSpeakingFormat());
         }
         if (request.getImageUrl() != null) {
             answer.setImageUrl(request.getImageUrl());
         }
+    }
+
+    /**
+     * Load all saved answers for a submission — used for exam resume.
+     * Validates student ownership.
+     */
+    @Transactional(readOnly = true)
+    public List<AnswerResponse> getAnswersForSubmission(Integer submissionId) {
+        Integer userId = SecurityUtils.getCurrentUserId();
+        Student student = studentRepository.findByUser_Id(userId)
+                .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
+
+        Submission submission = submissionRepository.findWithAssociationsById(submissionId)
+                .orElseThrow(() -> new NotFoundException("Submission", submissionId));
+
+        if (!submission.getStudent().getId().equals(student.getId())) {
+            throw new ForbiddenException("Cannot view another student's answers");
+        }
+
+        return answerRepository.findBySubmissionFetchQuestion(submission).stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Teacher/Admin: answers for grading, including speaking file paths.
+     */
+    @Transactional(readOnly = true)
+    public List<AnswerResponse> getAnswersForTeacher(Integer submissionId) {
+        Submission submission = submissionRepository.findWithAssociationsById(submissionId)
+                .orElseThrow(() -> new NotFoundException("Submission", submissionId));
+
+        if (SecurityUtils.hasRole("ADMIN")) {
+            // ok
+        } else if (SecurityUtils.hasRole("TEACHER")) {
+            Integer currentUserId = SecurityUtils.getCurrentUserId();
+            Integer ownerUserId = submission.getExam().getTeacher().getUser().getId();
+            if (!currentUserId.equals(ownerUserId)) {
+                throw new ForbiddenException("You do not have permission to view this submission");
+            }
+        } else {
+            throw new ForbiddenException("Not allowed");
+        }
+
+        return answerRepository.findBySubmissionFetchQuestion(submission).stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+
+    private AnswerResponse toResponse(Answer answer) {
+        return AnswerResponse.builder()
+                .id(answer.getId())
+                .submissionId(answer.getSubmission().getId())
+                .questionId(answer.getQuestion().getId())
+                .questionType(answer.getQuestion().getQuestionType())
+                .answerText(answer.getAnswerText())
+                .selectedOptionId(answer.getSelectedOptionId())
+                .speakingAudioUrl(answer.getSpeakingAudioUrl())
+                .speakingDurationSeconds(answer.getSpeakingDurationSeconds())
+                .speakingFormat(answer.getSpeakingFormat())
+                .imageUrl(answer.getImageUrl())
+                .build();
     }
 }

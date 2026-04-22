@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { studentApi } from '../services/api';
 
-export default function StudentTable({ classId }) {
+export default function StudentTable() {
   const [students, setStudents] = useState([]);
 
   useEffect(() => {

@@ -1,38 +1,58 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { examApi } from '../services/api';
+import { studentExamApi } from '../services/api';
 import Badge from '../components/common/Badge';
 import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
+import { useToast } from '../context/ToastContext';
 
 export default function ExamList() {
   const [exams, setExams] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('ALL');
+  const toast = useToast();
 
   useEffect(() => {
-    examApi.getAll()
+    studentExamApi.getActiveExams()
       .then((r) => setExams(r.data?.data || []))
-      .catch(() => setExams([]))
+      .catch((err) => {
+        setExams([]);
+        const msg = err.response?.data?.message || 'Failed to load exams.';
+        setError(msg);
+        toast.error(msg);
+      })
       .finally(() => setLoading(false));
-  }, []);
+  }, [toast]);
 
-  const statuses = ['ALL', 'ACTIVE', 'DRAFT', 'CLOSED'];
-
-  const filtered = exams.filter((e) => {
-    const matchSearch = e.title?.toLowerCase().includes(search.toLowerCase());
-    const matchFilter = filter === 'ALL' || e.status === filter;
-    return matchSearch && matchFilter;
-  });
+  const filtered = exams.filter((e) =>
+    e.title?.toLowerCase().includes(search.toLowerCase())
+  );
 
   if (loading) return <PageLoader />;
 
+  if (error) {
+    return (
+      <EmptyState
+        title="Could not load exams"
+        description={error}
+        action={
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition"
+          >
+            Retry
+          </button>
+        }
+      />
+    );
+  }
+
   return (
     <div className="space-y-5">
-      {/* Filters */}
-      <div className="card !p-4 flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
+      {/* Search */}
+      <div className="card !p-4">
+        <div className="relative">
           <svg
             className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
             fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -41,27 +61,14 @@ export default function ExamList() {
               d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
+            id="exam-search"
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search exams..."
             className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Search exams"
           />
-        </div>
-        <div className="flex gap-2">
-          {statuses.map((s) => (
-            <button
-              key={s}
-              onClick={() => setFilter(s)}
-              className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
-                filter === s
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300'
-              }`}
-            >
-              {s}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -105,7 +112,7 @@ export default function ExamList() {
                     {exam.durationMinutes} min
                   </div>
                   <span className="text-xs text-blue-600 font-medium group-hover:underline">
-                    Start exam →
+                    Start exam &rarr;
                   </span>
                 </div>
               </Link>

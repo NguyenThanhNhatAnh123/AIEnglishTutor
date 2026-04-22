@@ -4,11 +4,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
-@SpringBootTest
+@SpringBootTest(classes = EnglishSystemApplication.class)
 @ActiveProfiles("test")
-class EnglishSystemApplicationTests {
+class AienglishtutorApplicationTests {
 
     @Test
     void contextLoads() {
     }
+
 }

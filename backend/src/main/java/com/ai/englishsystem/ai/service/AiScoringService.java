@@ -74,7 +74,7 @@ public class AiScoringService {
             return toAiScoreResponse(existingSpeaking.get());
         }
 
-        String audioUrl = request.getAudioUrl() != null ? request.getAudioUrl() : answer.getAudioUrl();
+        String audioUrl = request.getAudioUrl() != null ? request.getAudioUrl() : answer.getSpeakingAudioUrl();
         if (audioUrl == null || audioUrl.isBlank()) {
             throw new BadRequestException("No audio URL to score");
         }
@@ -147,4 +147,5 @@ public class AiScoringService {
         if (o >= 8) sb.append("Well done!");
         return sb.toString().trim();
     }
+
 }

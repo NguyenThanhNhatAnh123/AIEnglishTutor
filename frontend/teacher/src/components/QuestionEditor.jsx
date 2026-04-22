@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { questionApi, examApi } from '../services/api';
 
 export default function QuestionEditor({ onClose, onSuccess }) {
-  const [exams, setExams] = useState([]);
   const [sections, setSections] = useState([]);
   const [form, setForm] = useState({
     sectionId: '',
@@ -20,7 +19,6 @@ export default function QuestionEditor({ onClose, onSuccess }) {
     examApi.getAll()
       .then((r) => {
         const list = r.data?.data || [];
-        setExams(list);
         const first = list[0];
         if (first?.id) {
           examApi.getById(first.id)

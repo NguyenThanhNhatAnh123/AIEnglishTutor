@@ -1,12 +1,30 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { examApi } from '../services/api';
 import Layout from '../components/Layout';
+import ExamSectionsModal from '../components/ExamSectionsModal';
 import Modal from '../components/common/Modal';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import { useToast } from '../context/ToastContext';
+
+function formatExamCreated(value) {
+  if (value == null || value === '') return '—';
+  if (Array.isArray(value) && value.length >= 3) {
+    const [y, mo = 1, d = 1, h = 0, mi = 0, s = 0] = value;
+    const dt = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s));
+    if (!Number.isNaN(dt.getTime())) {
+      return dt.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    }
+  }
+  const d = new Date(value);
+  if (!Number.isNaN(d.getTime())) {
+    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  return '—';
+}
 
 function ExamFormModal({ exam, onClose, onSuccess }) {
   const [form, setForm] = useState({
@@ -105,6 +123,7 @@ export default function ExamManagement() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [sectionsExam, setSectionsExam] = useState(null);
   const toast = useToast();
 
   const load = () => {
@@ -112,11 +131,18 @@ export default function ExamManagement() {
     examApi
       .getAll()
       .then((r) => setExams(r.data?.data || []))
-      .catch(() => setExams([]))
+      .catch((err) => {
+        setExams([]);
+        const msg = err?.response?.data?.message || 'Failed to load exams.';
+        toast.error(msg);
+      })
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load only
+  }, []);
 
   const handleDelete = async () => {
     setDeleteLoading(true);
@@ -145,9 +171,14 @@ export default function ExamManagement() {
     }
   };
 
-  const filtered = exams.filter((e) =>
-    e.title?.toLowerCase().includes(search.toLowerCase())
-  );
+  const q = search.toLowerCase().trim();
+  const filtered = exams.filter((e) => {
+    if (!q) return true;
+    const title = e.title?.toLowerCase() || '';
+    const desc = e.description?.toLowerCase() || '';
+    const owner = e.teacherName?.toLowerCase() || '';
+    return title.includes(q) || desc.includes(q) || owner.includes(q);
+  });
 
   return (
     <Layout>
@@ -183,49 +214,107 @@ export default function ExamManagement() {
         {loading ? (
           <PageLoader />
         ) : filtered.length === 0 ? (
-          <EmptyState title="No exams found" description="Create your first exam." />
+          <EmptyState
+            title="No exams found"
+            description={search.trim() ? 'Try another search.' : 'Create your first exam.'}
+          />
         ) : (
-          <div className="card overflow-hidden !p-0">
-            <table className="w-full text-sm">
+          <div className="space-y-2">
+            <p className="text-sm text-slate-500">
+              {filtered.length} exam{filtered.length !== 1 ? 's' : ''}
+              {search.trim() ? ` matching “${search.trim()}”` : ''}
+            </p>
+            <div className="card overflow-hidden !p-0 overflow-x-auto">
+            <table className="w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Title</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase min-w-[200px]">
+                    Exam
+                  </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Duration</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Sections</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">
+                    Created
+                  </th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {filtered.map((e) => (
+                {filtered.map((e) => {
+                  const canManage = e.canManage !== false;
+                  return (
                   <tr key={e.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-800">{e.title}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 align-top max-w-xs lg:max-w-md">
+                      <p className="font-medium text-slate-800">{e.title}</p>
+                      {e.description ? (
+                        <p className="text-xs text-slate-500 mt-1 line-clamp-2">{e.description}</p>
+                      ) : (
+                        <p className="text-xs text-slate-400 mt-1 italic">No description</p>
+                      )}
+                      {!canManage && e.teacherName && (
+                        <p className="text-xs text-amber-700 mt-1.5">
+                          Owner: {e.teacherName} (view only)
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-top">
                       <Badge status={e.status} label={e.status} />
                     </td>
-                    <td className="px-4 py-3 text-slate-400">{e.durationMinutes} min</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {e.status === 'DRAFT' && (
+                    <td className="px-4 py-3 text-slate-600 align-top whitespace-nowrap">
+                      {e.durationMinutes} min
+                    </td>
+                    <td className="px-4 py-3 text-center text-slate-600 align-top tabular-nums">
+                      {e.sectionCount != null ? e.sectionCount : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 text-xs align-top whitespace-nowrap hidden md:table-cell">
+                      {formatExamCreated(e.createdAt)}
+                    </td>
+                    <td className="px-4 py-3 text-right align-top">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {canManage && e.status === 'DRAFT' && (
                           <Button variant="ghost" size="sm" onClick={() => handlePublish(e)}>
                             Publish
                           </Button>
                         )}
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => { setEditExam(e); setShowForm(true); }}
-                        >
-                          Edit
-                        </Button>
-                        <Button variant="danger" size="sm" onClick={() => setDeleteTarget(e)}>
-                          Delete
-                        </Button>
+                        {canManage && (
+                          <Button variant="ghost" size="sm" onClick={() => setSectionsExam(e)}>
+                            Sections
+                          </Button>
+                        )}
+                        {canManage && (
+                          <Link
+                            to={`/questions?examId=${e.id}`}
+                            className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg text-slate-700 hover:bg-slate-100 transition-colors"
+                          >
+                            Questions
+                          </Link>
+                        )}
+                        {canManage && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => { setEditExam(e); setShowForm(true); }}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                        {canManage && (
+                          <Button variant="danger" size="sm" onClick={() => setDeleteTarget(e)}>
+                            Delete
+                          </Button>
+                        )}
+                        {!canManage && (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>
@@ -240,6 +329,21 @@ export default function ExamManagement() {
           onClose={() => setShowForm(false)}
           onSuccess={() => { setShowForm(false); load(); }}
         />
+      </Modal>
+
+      <Modal
+        isOpen={!!sectionsExam}
+        onClose={() => setSectionsExam(null)}
+        title="Exam sections"
+        maxWidth="max-w-3xl"
+      >
+        {sectionsExam && (
+          <ExamSectionsModal
+            examId={sectionsExam.id}
+            examTitle={sectionsExam.title}
+            onChanged={load}
+          />
+        )}
       </Modal>
 
       <Modal
