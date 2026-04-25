@@ -110,6 +110,20 @@ export const scoreApi = {
   update: (id, data) => api.put(`/scores/${id}`, data),
 };
 
+export const aiApi = {
+  imageOcrTts: (file) => {
+    const formData = new FormData();
+    formData.append('file', file, file.name || 'image.png');
+    // Let the browser/axios set multipart boundary automatically.
+    return api.post('/ai/image-ocr-tts', formData, { headers: {} });
+  },
+  scoreSpeaking: (answerId, audioUrl) =>
+    api.post('/ai/score-speaking', {
+      answerId,
+      audioUrl,
+    }),
+};
+
 export const submissionApi = {
   getByExamId: (examId) => api.get('/submissions', { params: { examId } }),
   getById: (id) => api.get(`/submissions/${id}`),

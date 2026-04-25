@@ -53,7 +53,7 @@ public class AnswerService {
 
         studentExamService.assertWithinDeadline(submission);
 
-        Question question = questionRepository.findById(request.getQuestionId())
+        Question question = questionRepository.findByIdWithSectionExam(request.getQuestionId())
                 .orElseThrow(() -> new NotFoundException("Question", request.getQuestionId()));
 
         if (!questionBelongsToExam(question, submission.getExam())) {

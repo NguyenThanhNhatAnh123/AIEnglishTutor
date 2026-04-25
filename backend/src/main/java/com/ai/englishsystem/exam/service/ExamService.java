@@ -366,7 +366,7 @@ public class ExamService {
                                 ? s.getQuestions().stream()
                                 .map(q -> QuestionResponse.builder()
                                         .id(q.getId())
-                                        .sectionId(q.getSection().getId())
+                                        .sectionId(s.getId())
                                         .sectionName(s.getName())
                                         .sectionType(s.getSectionType() != null ? s.getSectionType().name() : null)
                                         .examId(exam.getId())

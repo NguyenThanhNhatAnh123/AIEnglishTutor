@@ -86,7 +86,7 @@ public class SpeakingUploadService {
         }
         studentExamService.assertWithinDeadline(submission);
 
-        Question question = questionRepository.findById(questionId)
+        Question question = questionRepository.findByIdWithSectionExam(questionId)
                 .orElseThrow(() -> new NotFoundException("Question", questionId));
 
         if (!questionBelongsToExam(question, submission)) {

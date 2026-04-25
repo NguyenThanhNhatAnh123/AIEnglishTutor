@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
-import { questionApi, examApi, examSectionApi, mediaApi } from '../services/api';
+import { questionApi, examApi, examSectionApi, mediaApi, aiApi } from '../services/api';
 import Layout from '../components/Layout';
 import Modal from '../components/common/Modal';
 import Button from '../components/common/Button';
@@ -92,6 +92,29 @@ function QuestionFormFields({
     }
   };
 
+  const handleImageOcrTts = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAudioUploading(true);
+    try {
+      const res = await aiApi.imageOcrTts(file);
+      const data = res.data?.data || {};
+      setForm((f) => ({
+        ...f,
+        listeningAudioUrl: data.audioUrl || f.listeningAudioUrl,
+        transcript: data.extractedText || f.transcript,
+        questionText: f.questionText?.trim() ? f.questionText : (data.extractedText || ''),
+      }));
+      toast.success('Image OCR + TTS completed.');
+    } catch (err) {
+      const msg = err?.response?.data?.message || err.message || 'Image OCR + TTS failed.';
+      toast.error(msg);
+    } finally {
+      setAudioUploading(false);
+    }
+  };
+
   const audioPreview =
     form.listeningAudioUrl && !form.listeningAudioUrl.startsWith('http')
       ? `${API_ORIGIN}${form.listeningAudioUrl.startsWith('/') ? '' : '/'}${form.listeningAudioUrl}`
@@ -176,8 +199,27 @@ function QuestionFormFields({
 
       {(form.questionType === QUESTION_TYPES.LISTENING || form.questionType === QUESTION_TYPES.SPEAKING) && (
         <div className="space-y-2 rounded-xl border border-slate-200 p-4 bg-slate-50/80">
-          <label className="block text-sm font-medium text-slate-700">Audio (required)</label>
-          <input type="file" accept="audio/*" onChange={handleAudioFile} disabled={audioUploading} className="text-sm" />
+          <label className="block text-sm font-medium text-slate-700">Audio (required, supports MP3)</label>
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="file"
+              accept=".mp3,audio/mpeg,audio/mp3,audio/wav,audio/webm,audio/ogg,audio/mp4"
+              onChange={handleAudioFile}
+              disabled={audioUploading}
+              className="text-sm"
+            />
+            <label className="text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white cursor-pointer hover:bg-slate-100">
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/webp"
+                onChange={handleImageOcrTts}
+                disabled={audioUploading}
+                className="hidden"
+              />
+              OCR + TTS from image
+            </label>
+          </div>
+          <p className="text-xs text-slate-500">Recommended format: MP3.</p>
           {audioUploading && <p className="text-xs text-slate-500">Uploading…</p>}
           {form.listeningAudioUrl ? (
             <p className="text-xs text-slate-600 break-all">

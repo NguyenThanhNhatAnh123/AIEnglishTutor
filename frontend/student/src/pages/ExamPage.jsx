@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { studentExamApi, API_ORIGIN } from '../services/api';
+import { studentExamApi, aiApi, API_ORIGIN } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import Modal from '../components/common/Modal';
 import Button from '../components/common/Button';
@@ -126,17 +126,75 @@ function MCQuestion({ question, value, onChange }) {
 }
 
 /* ─── Writing component ────────────────────────────────────────────────── */
-function WritingQuestion({ value, onChange }) {
+function WritingQuestion({ value, onChange, toast, disabled }) {
+  const [processing, setProcessing] = useState(false);
+
+  const onPickImage = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      setProcessing(true);
+      const res = await aiApi.imageOcrTts(file);
+      const data = res.data?.data || {};
+      onChange({
+        imageUrl: data.imageUrl || undefined,
+        answerText: data.extractedText || value?.answerText || '',
+        speakingAudioUrl: data.audioUrl || undefined,
+        speakingFormat: data.audioUrl ? 'mp3' : value?.speakingFormat,
+      });
+      toast.info('Image OCR + TTS completed.');
+    } catch (e) {
+      toast.error(e.response?.data?.message || 'Failed to process image.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const generatedAudioSrc = resolveAudioSrc(value?.speakingAudioUrl);
+
   return (
-    <textarea
-      value={value?.answerText || ''}
-      onChange={(e) => onChange({ answerText: e.target.value })}
-      placeholder="Write your answer here..."
-      rows={8}
-      aria-label="Your written answer"
-      className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
-    />
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-600 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/jpg,image/webp"
+            onChange={onPickImage}
+            disabled={disabled || processing}
+            className="hidden"
+          />
+          {processing ? 'Processing image...' : 'Upload image for OCR + TTS'}
+        </label>
+        {value?.imageUrl && (
+          <a
+            href={resolveAudioSrc(value.imageUrl)}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-blue-600 hover:underline"
+          >
+            View uploaded image
+          </a>
+        )}
+      </div>
+      {generatedAudioSrc && (
+        <AudioPlayer src={generatedAudioSrc} disabled={disabled} className="max-w-md" />
+      )}
+      <textarea
+        value={value?.answerText || ''}
+        onChange={(e) => onChange({ answerText: e.target.value })}
+        placeholder="Write your answer here..."
+        rows={8}
+        aria-label="Your written answer"
+        disabled={disabled}
+        className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y disabled:opacity-60"
+      />
+    </div>
   );
+}
+
+function sectionQuestionCount(sections) {
+  return (sections || []).reduce((acc, s) => acc + ((s.questions || []).length), 0);
 }
 
 /* ─── Question block ───────────────────────────────────────────────────── */
@@ -165,7 +223,14 @@ function QuestionBlock({ question, value, onChange, toast, interactionLocked, su
       {(type === 'MULTIPLE_CHOICE' || type === 'LISTENING') && (
         <MCQuestion question={question} value={value} onChange={onChange} />
       )}
-      {type === 'WRITING' && <WritingQuestion value={value} onChange={onChange} />}
+      {type === 'WRITING' && (
+        <WritingQuestion
+          value={value}
+          onChange={onChange}
+          toast={toast}
+          disabled={interactionLocked}
+        />
+      )}
       {type === 'SPEAKING' && submissionId != null && (
         <AudioRecorder
           submissionId={submissionId}
@@ -297,6 +362,7 @@ export default function ExamPage() {
               speakingAudioUrl: ans.speakingAudioUrl || undefined,
               speakingDurationSeconds: ans.speakingDurationSeconds ?? undefined,
               speakingFormat: ans.speakingFormat || undefined,
+              imageUrl: ans.imageUrl || undefined,
             };
           }
           if (Object.keys(restored).length > 0) {
@@ -325,6 +391,7 @@ export default function ExamPage() {
           speakingAudioUrl: data?.speakingAudioUrl ?? undefined,
           speakingDurationSeconds: data?.speakingDurationSeconds ?? undefined,
           speakingFormat: data?.speakingFormat ?? undefined,
+          imageUrl: data?.imageUrl ?? undefined,
         })
         .catch(() => {});
     },
@@ -365,6 +432,7 @@ export default function ExamPage() {
           speakingAudioUrl: data.speakingAudioUrl ?? undefined,
           speakingDurationSeconds: data.speakingDurationSeconds ?? undefined,
           speakingFormat: data.speakingFormat ?? undefined,
+          imageUrl: data.imageUrl ?? undefined,
         })
       )
     );
@@ -500,18 +568,59 @@ export default function ExamPage() {
       {/* ─── Pre-start screen ──────────────────────────────────────── */}
       {!submission ? (
         <div className="flex items-center justify-center py-20 px-4">
-          <div className="card max-w-md text-center dark:bg-slate-900 dark:border-slate-700">
+          <div className="card max-w-3xl w-full dark:bg-slate-900 dark:border-slate-700">
             <div className="w-16 h-16 rounded-full bg-blue-50 dark:bg-slate-800 flex items-center justify-center text-blue-500 mx-auto mb-4">
               <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                   d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z" />
               </svg>
             </div>
-            <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 mb-2">{exam.title}</h2>
-            <p className="text-slate-400 text-sm mb-2">{exam.description}</p>
-            <div className="flex items-center justify-center gap-4 text-sm text-slate-500 dark:text-slate-400 mb-6">
-              <span>&#9201; {exam.durationMinutes} minutes</span>
-              <span>&#128221; {allQuestions.length} questions</span>
+            <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 text-center mb-2">{exam.title}</h2>
+            <p className="text-slate-500 dark:text-slate-300 text-sm text-center mb-6">{exam.description || 'No description.'}</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Duration</p>
+                <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{exam.durationMinutes} min</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Questions</p>
+                <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{allQuestions.length}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Sections</p>
+                <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{exam.sections?.length || 0}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Exam structure</p>
+                <div className="space-y-2 max-h-44 overflow-auto pr-1">
+                  {(exam.sections || []).map((s) => (
+                    <div key={s.id} className="flex items-center justify-between text-sm">
+                      <span className="text-slate-600 dark:text-slate-300 truncate">{s.name}</span>
+                      <span className="text-slate-500 text-xs">{(s.questions || []).length} q</span>
+                    </div>
+                  ))}
+                  {(!exam.sections || exam.sections.length === 0) && (
+                    <p className="text-xs text-slate-400">No sections found.</p>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Before you start</p>
+                <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
+                  <li>• Keep a stable internet connection.</li>
+                  <li>• Use headphones for listening/speaking parts.</li>
+                  <li>• Allow microphone permission for speaking answers (saved as MP3).</li>
+                  <li>• Need at least 50% answered to submit.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="text-xs text-slate-500 mb-4 text-center">
+              Total questions from sections: {sectionQuestionCount(exam.sections)}
             </div>
             <Button variant="primary" size="lg" onClick={startExam} className="w-full">
               Start Exam

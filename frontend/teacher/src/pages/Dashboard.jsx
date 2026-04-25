@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { classApi, examApi } from '../services/api';
+import { classApi, examApi, questionApi, API_ORIGIN } from '../services/api';
 import Layout from '../components/Layout';
 import { PageLoader } from '../components/common/LoadingSpinner';
 
@@ -20,17 +20,28 @@ function KpiCard({ label, value, icon, color, to }) {
 export default function Dashboard() {
   const [stats, setStats] = useState({ classes: 0, exams: 0, pending: 0 });
   const [recentExams, setRecentExams] = useState([]);
+  const [audioQuestions, setAudioQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       classApi.getAll().then((r) => r.data?.data || []),
       examApi.getAll().then((r) => r.data?.data || []),
+      questionApi.getAll().then((r) => r.data?.data || []),
     ])
-      .then(([classes, exams]) => {
+      .then(([classes, exams, questions]) => {
         const activeExams = exams.filter((e) => e.status === 'ACTIVE');
-        setStats({ classes: classes.length, exams: activeExams.length, total: exams.length });
+        const listeningWithAudio = questions.filter(
+          (q) => q.questionType === 'LISTENING' && typeof q.listeningAudioUrl === 'string' && q.listeningAudioUrl.length > 0
+        );
+        setStats({
+          classes: classes.length,
+          exams: activeExams.length,
+          total: exams.length,
+          listeningAudio: listeningWithAudio.length,
+        });
         setRecentExams(exams.slice(0, 5));
+        setAudioQuestions(listeningWithAudio.slice(0, 5));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -70,6 +81,34 @@ export default function Dashboard() {
             color="bg-amber-50 text-amber-600"
             icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>}
           />
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="section-title">Listening Audio (MP3 ready)</h3>
+            <Link to="/questions" className="text-sm text-blue-600 hover:underline font-medium">Manage questions →</Link>
+          </div>
+          <div className="card space-y-3">
+            <p className="text-sm text-slate-600">
+              Total listening questions with audio: <strong>{stats.listeningAudio ?? 0}</strong>
+            </p>
+            {audioQuestions.length === 0 ? (
+              <p className="text-sm text-slate-400">No listening audio found yet.</p>
+            ) : (
+              audioQuestions.map((q) => {
+                const src = q.listeningAudioUrl?.startsWith('http')
+                  ? q.listeningAudioUrl
+                  : `${API_ORIGIN}${q.listeningAudioUrl?.startsWith('/') ? '' : '/'}${q.listeningAudioUrl || ''}`;
+                return (
+                  <div key={q.id} className="border border-slate-100 rounded-xl p-3">
+                    <p className="text-xs text-slate-500 mb-1">{q.examTitle || 'Exam'} · {q.sectionName || 'Section'}</p>
+                    <p className="text-sm text-slate-700 line-clamp-2 mb-2">{q.questionText}</p>
+                    <audio controls className="w-full" src={src} />
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
 
         {/* Recent exams table */}

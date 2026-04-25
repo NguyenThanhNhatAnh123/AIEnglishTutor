@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { examApi, submissionApi, scoreApi, API_ORIGIN } from '../services/api';
+import { examApi, submissionApi, scoreApi, aiApi, API_ORIGIN } from '../services/api';
 import Layout from '../components/Layout';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
@@ -8,6 +8,7 @@ import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import AudioPlayer from '../../../packages/ui/AudioPlayer.jsx';
 import SpeakingWaveform from '../../../packages/ui/SpeakingWaveform.jsx';
+import { useToast } from '../context/ToastContext';
 
 function resolveMediaSrc(url) {
   if (!url) return null;
@@ -71,6 +72,8 @@ function ScoreDetailModal({ submission, onClose }) {
   const [score, setScore] = useState(null);
   const [answers, setAnswers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [scoringAnswerId, setScoringAnswerId] = useState(null);
+  const toast = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +98,33 @@ function ScoreDetailModal({ submission, onClose }) {
     })();
     return () => { cancelled = true; };
   }, [submission.id]);
+
+  const runQuickSpeakingScore = async (answer) => {
+    if (!answer?.id || !answer?.speakingAudioUrl) {
+      toast.error('Missing speaking answer/audio URL.');
+      return;
+    }
+    try {
+      setScoringAnswerId(answer.id);
+      const res = await aiApi.scoreSpeaking(answer.id, answer.speakingAudioUrl);
+      const ai = res.data?.data;
+      toast.success(
+        ai?.overallScore != null
+          ? `AI scored speaking: ${Number(ai.overallScore).toFixed(1)}/10`
+          : 'AI speaking score completed.'
+      );
+      try {
+        const latestScore = await scoreApi.getBySubmissionId(submission.id);
+        setScore(latestScore.data?.data ?? score);
+      } catch {
+        // no-op: keep current score block
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Quick speaking score failed.');
+    } finally {
+      setScoringAnswerId(null);
+    }
+  };
 
   return (
     <Modal isOpen onClose={onClose} title={`Score – ${submission.studentName || `Student #${submission.studentId}`}`} maxWidth="max-w-lg">
@@ -123,6 +153,14 @@ function ScoreDetailModal({ submission, onClose }) {
                   <p className="text-xs text-slate-400">Question #{a.questionId}</p>
                   <AudioPlayer src={resolveMediaSrc(a.speakingAudioUrl)} disabled={false} />
                   <SpeakingWaveform src={resolveMediaSrc(a.speakingAudioUrl)} />
+                  <button
+                    type="button"
+                    className="text-xs text-emerald-700 hover:underline"
+                    disabled={scoringAnswerId === a.id}
+                    onClick={() => runQuickSpeakingScore(a)}
+                  >
+                    {scoringAnswerId === a.id ? 'Scoring...' : 'Quick AI score'}
+                  </button>
                   <button
                     type="button"
                     className="text-xs text-blue-600 hover:underline"

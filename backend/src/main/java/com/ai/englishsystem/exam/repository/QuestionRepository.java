@@ -28,4 +28,8 @@ public interface QuestionRepository extends JpaRepository<Question, Integer> {
     @EntityGraph(attributePaths = {"options", "section", "section.exam", "section.exam.teacher", "section.exam.teacher.user"})
     @Query("SELECT q FROM Question q WHERE q.id = :id")
     Optional<Question> findDetailById(@Param("id") Integer id);
+
+    @EntityGraph(attributePaths = {"section", "section.exam"})
+    @Query("SELECT q FROM Question q WHERE q.id = :id")
+    Optional<Question> findByIdWithSectionExam(@Param("id") Integer id);
 }

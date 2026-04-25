@@ -101,8 +101,8 @@ export default function AudioRecorder({
       } else {
         toast.error('Upload succeeded but no URL returned.');
       }
-    } catch {
-      toast.error('Upload failed. Please try again.');
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Upload failed. Please try again.');
     } finally {
       setUploading(false);
     }
@@ -174,7 +174,7 @@ export default function AudioRecorder({
 
       {hasServer && value?.speakingDurationSeconds != null && (
         <p className="text-xs text-slate-500">
-          Saved: {value.speakingDurationSeconds}s · {value.speakingFormat || 'mp3'}
+          Saved MP3: {value.speakingDurationSeconds}s · {value.speakingFormat || 'mp3'}
         </p>
       )}
       {listenSrc && !recording && (

@@ -9,6 +9,15 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
+
+  // If payload is FormData, do NOT force Content-Type.
+  // The browser will set "multipart/form-data; boundary=..." automatically.
+  if (config.data instanceof FormData) {
+    if (config.headers) {
+      delete config.headers['Content-Type'];
+      delete config.headers['content-type'];
+    }
+  }
   return config;
 });
 
@@ -59,10 +68,10 @@ export const scoreApi = {
 export const mediaApi = {
   upload: (file) => {
     const formData = new FormData();
-    formData.append('file', file, file.name || 'recording.webm');
-    return api.post('/media/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    // ✅ Dùng fallback chắc chắn cho filename
+    formData.append('file', file, 'recording.webm');
+    return api.post('/media/upload', formData);
+    // ✅ Bỏ header Content-Type - để axios/browser tự set kèm boundary
   },
 };
 
@@ -70,12 +79,30 @@ export const mediaApi = {
 export const speakingApi = {
   upload: (blob, submissionId, questionId) => {
     const formData = new FormData();
-    formData.append('file', blob, blob.type?.includes('webm') ? 'recording.webm' : 'recording.dat');
+    const ext = blob.type?.includes('webm')
+      ? 'webm'
+      : blob.type?.includes('ogg')
+        ? 'ogg'
+        : blob.type?.includes('wav')
+          ? 'wav'
+          : blob.type?.includes('mpeg') || blob.type?.includes('mp3')
+            ? 'mp3'
+            : blob.type?.includes('mp4')
+              ? 'm4a'
+              : 'bin';
+    formData.append('file', blob, `recording.${ext}`);
     formData.append('submissionId', String(submissionId));
     formData.append('questionId', String(questionId));
-    return api.post('/speaking/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
+    return api.post('/speaking/upload', formData);
+  },
+};
+
+export const aiApi = {
+  imageOcrTts: (file) => {
+    const formData = new FormData();
+    formData.append('file', file, file.name || 'image.png');
+    // Let the browser/axios set multipart boundary automatically.
+    return api.post('/ai/image-ocr-tts', formData, { headers: {} });
   },
 };
 
