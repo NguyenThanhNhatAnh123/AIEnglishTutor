@@ -11,8 +11,8 @@
 
   body {
     font-family: 'DM Sans', system-ui, sans-serif;
-    background-color: #f8fafc;
-    color: #1e293b;
+    background: linear-gradient(to right, #ffffff, #f8f5f0);
+    color: #374151;
   }
 
   ::-webkit-scrollbar {
@@ -37,11 +37,39 @@
 
 @layer components {
   .sidebar-link {
-    @apply flex items-center gap-3 px-4 py-2.5 rounded-lg text-blue-200 hover:bg-blue-700/50 hover:text-white transition-all duration-150 text-sm font-medium;
+    @apply relative flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-600 hover:text-slate-900 transition-all duration-200 text-sm font-medium;
+    @apply hover:bg-white/60;
+    @apply hover:shadow-[0_2px_8px_rgba(0,0,0,0.05)];
   }
 
   .sidebar-link.active {
-    @apply bg-blue-600 text-white shadow-md;
+    @apply bg-white/80 text-slate-900 shadow-[0_2px_8px_rgba(0,0,0,0.05)];
+    @apply ring-1 ring-amber-100/70;
+  }
+
+  /* Subtle blue accent bar for active item */
+  .sidebar-link.active::before {
+    content: '';
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 9999px;
+    background: #2563eb; /* blue-600 accent */
+  }
+
+  /* Icon accent on hover/active (subtle) */
+  .sidebar-link svg {
+    color: #64748b; /* slate-500 */
+    transition: color 200ms ease, transform 200ms ease;
+  }
+  .sidebar-link:hover svg {
+    color: #2563eb;
+    transform: translateY(-1px);
+  }
+  .sidebar-link.active svg {
+    color: #2563eb;
   }
 
   .card {

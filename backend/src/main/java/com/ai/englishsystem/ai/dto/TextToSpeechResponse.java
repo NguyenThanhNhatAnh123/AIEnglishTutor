@@ -5,16 +5,10 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.util.List;
-
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ImageOcrTtsResponse {
-    private String imageUrl;
-    private String extractedText;
-    private String questionText;
-    private List<String> choices;
+public class TextToSpeechResponse {
     private String audioUrl;
 }

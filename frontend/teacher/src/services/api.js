@@ -97,6 +97,7 @@ export const questionApi = {
   getAll: (examId) =>
     api.get('/questions', { params: examId != null && examId !== '' ? { examId } : {} }),
   create: (data) => api.post('/questions', data),
+  createBulk: (questions) => api.post('/questions/bulk', { questions }),
   update: (id, data) => api.put(`/questions/${id}`, data),
   delete: (id) => api.delete(`/questions/${id}`),
 };
@@ -122,6 +123,7 @@ export const aiApi = {
       answerId,
       audioUrl,
     }),
+  tts: (text) => api.post('/ai/tts', { text }),
 };
 
 export const submissionApi = {

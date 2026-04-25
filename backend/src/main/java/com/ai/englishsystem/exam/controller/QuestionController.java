@@ -1,6 +1,7 @@
 package com.ai.englishsystem.exam.controller;
 
 import com.ai.englishsystem.common.dto.ApiResponse;
+import com.ai.englishsystem.exam.dto.BulkQuestionCreateRequest;
 import com.ai.englishsystem.exam.dto.QuestionRequest;
 import com.ai.englishsystem.exam.dto.QuestionResponse;
 import com.ai.englishsystem.exam.service.QuestionService;
@@ -31,6 +32,14 @@ public class QuestionController {
     public ResponseEntity<ApiResponse<QuestionResponse>> create(@Valid @RequestBody QuestionRequest request) {
         QuestionResponse response = questionService.create(request);
         return ResponseEntity.ok(ApiResponse.success("Question created", response));
+    }
+
+    @PostMapping("/bulk")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<List<QuestionResponse>>> createBulk(
+            @Valid @RequestBody BulkQuestionCreateRequest request) {
+        List<QuestionResponse> response = questionService.createBulk(request.getQuestions());
+        return ResponseEntity.ok(ApiResponse.success("Questions created", response));
     }
 
     @PutMapping("/{id}")

@@ -22,6 +22,8 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -35,6 +37,7 @@ public class ImageOcrTtsService {
             "image/jpg",
             "image/webp"
     );
+    private static final Pattern CHOICE_PREFIX = Pattern.compile("^(?:[A-Da-d][\\).]|\\d+[\\).]|[-*•])\\s+");
 
     private final FfmpegAudioService ffmpegAudioService;
 
@@ -70,12 +73,13 @@ public class ImageOcrTtsService {
             file.transferTo(imagePath.toFile());
             assertValidImageMagic(imagePath, file.getContentType());
 
-            String extractedText = runOcr(imagePath).trim();
+            String extractedText = normalizeWhitespace(runOcr(imagePath));
             if (extractedText.isBlank()) {
                 throw new BadRequestException("OCR extracted empty text from image");
             }
+            OcrParsed parsed = parseQuestionAndChoices(extractedText);
 
-            runEspeak(extractedText, wavPath);
+            runEspeak(parsed.questionText(), wavPath);
             ffmpegAudioService.transcodeToMp3(wavPath, mp3Path);
 
             String imageUrl = "/uploads/audio/images/" + imagePath.getFileName();
@@ -85,6 +89,8 @@ public class ImageOcrTtsService {
             return ImageOcrTtsResponse.builder()
                     .imageUrl(imageUrl)
                     .extractedText(extractedText)
+                    .questionText(parsed.questionText())
+                    .choices(parsed.choices())
                     .audioUrl(audioUrl)
                     .build();
         } catch (BadRequestException e) {
@@ -93,6 +99,38 @@ public class ImageOcrTtsService {
         } catch (Exception e) {
             log.error("Image OCR+TTS failed", e);
             throw new BadRequestException("Image OCR/TTS processing failed: " + e.getMessage());
+        } finally {
+            try {
+                Files.deleteIfExists(wavPath);
+            } catch (IOException ignored) {
+                // ignore cleanup errors
+            }
+        }
+    }
+
+    public String synthesizeTextToAudio(String text) {
+        String cleanText = normalizeWhitespace(text);
+        if (cleanText.isBlank()) {
+            throw new BadRequestException("text cannot be blank");
+        }
+        String unique = UUID.randomUUID().toString().replace("-", "");
+        Path ttsDir = Paths.get(uploadDir).toAbsolutePath().normalize().resolve("audio").resolve("tts");
+        Path wavPath = ttsDir.resolve(unique + ".wav").normalize();
+        Path mp3Path = ttsDir.resolve(unique + ".mp3").normalize();
+        ensureSafePath(wavPath, ttsDir);
+        ensureSafePath(mp3Path, ttsDir);
+        try {
+            Files.createDirectories(ttsDir);
+            runEspeak(cleanText, wavPath);
+            ffmpegAudioService.transcodeToMp3(wavPath, mp3Path);
+            String audioUrl = "/uploads/audio/tts/" + mp3Path.getFileName();
+            log.info("Generated TTS audio: {}", audioUrl);
+            return audioUrl;
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Text-to-speech failed", e);
+            throw new BadRequestException("TTS processing failed: " + e.getMessage());
         } finally {
             try {
                 Files.deleteIfExists(wavPath);
@@ -253,4 +291,39 @@ public class ImageOcrTtsService {
             throw new BadRequestException(label + " was interrupted");
         }
     }
+
+    private static String normalizeWhitespace(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        return raw.replace("\r", "")
+                .lines()
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .collect(Collectors.joining("\n"))
+                .trim();
+    }
+
+    private OcrParsed parseQuestionAndChoices(String extractedText) {
+        List<String> lines = extractedText.lines()
+                .map(String::trim)
+                .filter(s -> !s.isBlank())
+                .collect(Collectors.toList());
+        List<String> choices = new ArrayList<>();
+        List<String> questionLines = new ArrayList<>();
+        for (String line : lines) {
+            if (CHOICE_PREFIX.matcher(line).find()) {
+                String choice = CHOICE_PREFIX.matcher(line).replaceFirst("").trim();
+                if (!choice.isBlank()) {
+                    choices.add(choice);
+                }
+            } else if (choices.isEmpty()) {
+                questionLines.add(line);
+            }
+        }
+        String questionText = questionLines.isEmpty() ? extractedText : String.join(" ", questionLines).trim();
+        return new OcrParsed(questionText, choices);
+    }
+
+    private record OcrParsed(String questionText, List<String> choices) {}
 }

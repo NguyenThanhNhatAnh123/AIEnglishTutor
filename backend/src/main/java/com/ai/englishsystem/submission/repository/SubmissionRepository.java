@@ -17,6 +17,8 @@ public interface SubmissionRepository extends JpaRepository<Submission, Integer>
 
     List<Submission> findByExam(Exam exam);
 
+    void deleteByExam(Exam exam);
+
     @EntityGraph(attributePaths = {"exam", "student", "examAttempt"})
     Optional<Submission> findByExamAndStudentAndStatus(Exam exam, Student student, SubmissionStatus status);
 

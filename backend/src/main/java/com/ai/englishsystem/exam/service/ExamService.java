@@ -16,13 +16,24 @@ import com.ai.englishsystem.exam.dto.QuestionResponse;
 import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.entity.ExamSection;
 import com.ai.englishsystem.exam.entity.ExamSectionType;
+import com.ai.englishsystem.exam.entity.ExamAttempt;
 import com.ai.englishsystem.exam.repository.ExamRepository;
 import com.ai.englishsystem.exam.repository.ExamSectionRepository;
+import com.ai.englishsystem.exam.repository.ExamAttemptRepository;
+import com.ai.englishsystem.result.repository.FeedbackRepository;
+import com.ai.englishsystem.result.repository.ScoreRepository;
+import com.ai.englishsystem.ai.repository.AiResultRepository;
+import com.ai.englishsystem.speaking.service.SpeakingFileStorage;
 import com.ai.englishsystem.teacher.entity.Teacher;
 import com.ai.englishsystem.teacher.repository.TeacherRepository;
+import com.ai.englishsystem.submission.entity.Answer;
+import com.ai.englishsystem.submission.entity.Submission;
+import com.ai.englishsystem.submission.repository.AnswerRepository;
+import com.ai.englishsystem.submission.repository.SubmissionRepository;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,12 +44,20 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ExamService {
 
     private final ExamRepository examRepository;
     private final ExamSectionRepository examSectionRepository;
     private final TeacherRepository teacherRepository;
     private final UserRepository userRepository;
+    private final SubmissionRepository submissionRepository;
+    private final AnswerRepository answerRepository;
+    private final ScoreRepository scoreRepository;
+    private final AiResultRepository aiResultRepository;
+    private final FeedbackRepository feedbackRepository;
+    private final ExamAttemptRepository examAttemptRepository;
+    private final SpeakingFileStorage speakingFileStorage;
 
     // ─── READ ────────────────────────────────────────────────────────────────
 
@@ -177,8 +196,28 @@ public class ExamService {
                 .orElseThrow(() -> new NotFoundException("Exam", id));
 
         assertOwnerOrAdmin(exam);
-
+        List<Submission> submissions = submissionRepository.findByExam(exam);
+        for (Submission submission : submissions) {
+            List<Answer> answers = answerRepository.findBySubmission(submission);
+            if (!answers.isEmpty()) {
+                feedbackRepository.deleteByAnswerIn(answers);
+                aiResultRepository.deleteByAnswerIn(answers);
+            }
+            for (Answer answer : answers) {
+                speakingFileStorage.deleteIfExists(answer.getSpeakingAudioUrl());
+            }
+        }
+        if (!submissions.isEmpty()) {
+            scoreRepository.deleteBySubmissionIn(submissions);
+            submissionRepository.deleteByExam(exam);
+        }
+        List<ExamAttempt> attempts = examAttemptRepository.findByExam(exam);
+        if (!attempts.isEmpty()) {
+            examAttemptRepository.deleteAllInBatch(attempts);
+        }
         examRepository.delete(exam);
+        log.info("Exam deleted with cascade cleanup: examId={}, submissions={}, attempts={}",
+                exam.getId(), submissions.size(), attempts.size());
     }
 
     // ─── SECTIONS (teacher / admin — same ownership rules as exam) ───────────

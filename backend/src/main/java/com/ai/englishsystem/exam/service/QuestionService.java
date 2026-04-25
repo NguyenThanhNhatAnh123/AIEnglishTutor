@@ -17,6 +17,7 @@ import com.ai.englishsystem.exam.repository.ExamRepository;
 import com.ai.englishsystem.exam.repository.ExamSectionRepository;
 import com.ai.englishsystem.exam.repository.QuestionRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class QuestionService {
 
     private final QuestionRepository questionRepository;
@@ -87,6 +89,18 @@ public class QuestionService {
         question = questionRepository.save(question);
 
         return toResponse(question);
+    }
+
+    @Transactional
+    public List<QuestionResponse> createBulk(List<QuestionRequest> requests) {
+        if (requests == null || requests.isEmpty()) {
+            throw new BadRequestException("questions must contain at least one item");
+        }
+        List<QuestionResponse> created = requests.stream()
+                .map(this::create)
+                .collect(Collectors.toList());
+        log.info("Bulk question create success: count={}", created.size());
+        return created;
     }
 
     @Transactional
@@ -206,38 +220,35 @@ public class QuestionService {
     }
 
     private void validateQuestionForSection(ExamSectionType sectionType, String qType, QuestionRequest request) {
-        switch (sectionType) {
-            case READING -> {
-                if (!"MULTIPLE_CHOICE".equals(qType)) {
-                    throw new BadRequestException("READING sections only support MULTIPLE_CHOICE questions");
-                }
+        if (sectionType == ExamSectionType.READING) {
+            if (!"MULTIPLE_CHOICE".equals(qType)) {
+                throw new BadRequestException("READING sections only support MULTIPLE_CHOICE questions");
             }
-            case LISTENING -> {
-                if (!"LISTENING".equals(qType)) {
-                    throw new BadRequestException("LISTENING sections only support LISTENING questions");
-                }
+        } else if (sectionType == ExamSectionType.LISTENING) {
+            if (!"LISTENING".equals(qType)) {
+                throw new BadRequestException("LISTENING sections only support LISTENING questions");
             }
-            case WRITING -> {
-                if (!"WRITING".equals(qType)) {
-                    throw new BadRequestException("WRITING sections only support WRITING questions");
-                }
+        } else if (sectionType == ExamSectionType.WRITING) {
+            if (!"WRITING".equals(qType)) {
+                throw new BadRequestException("WRITING sections only support WRITING questions");
             }
-            case SPEAKING -> {
-                if (!"SPEAKING".equals(qType)) {
-                    throw new BadRequestException("SPEAKING sections only support SPEAKING questions");
-                }
+        } else if (sectionType == ExamSectionType.SPEAKING) {
+            if (!"SPEAKING".equals(qType)) {
+                throw new BadRequestException("SPEAKING sections only support SPEAKING questions");
             }
         }
 
-        switch (qType) {
-            case "MULTIPLE_CHOICE" -> validateMcqOptions(request.getOptions());
-            case "LISTENING" -> {
-                validateAudioRequired(request, "LISTENING");
-                validateMcqOptions(request.getOptions());
-            }
-            case "WRITING" -> validateWriting(request);
-            case "SPEAKING" -> validateAudioRequired(request, "SPEAKING");
-            default -> throw new BadRequestException("Unsupported questionType: " + qType);
+        if ("MULTIPLE_CHOICE".equals(qType)) {
+            validateMcqOptions(request.getOptions());
+        } else if ("LISTENING".equals(qType)) {
+            validateAudioRequired(request, "LISTENING");
+            validateMcqOptions(request.getOptions());
+        } else if ("WRITING".equals(qType)) {
+            validateWriting(request);
+        } else if ("SPEAKING".equals(qType)) {
+            validateAudioRequired(request, "SPEAKING");
+        } else {
+            throw new BadRequestException("Unsupported questionType: " + qType);
         }
     }
 

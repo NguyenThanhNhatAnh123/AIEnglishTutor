@@ -44,6 +44,109 @@ function emptyForm() {
   };
 }
 
+function parseCorrectToken(token, optionCount) {
+  if (!token) return null;
+  const t = String(token).trim();
+  if (!t) return null;
+  // Accept: A/B/C/D, 1/2/3/4, 0-based index
+  const upper = t.toUpperCase();
+  if (/^[A-Z]$/.test(upper)) {
+    const idx = upper.charCodeAt(0) - 'A'.charCodeAt(0);
+    return idx >= 0 && idx < optionCount ? idx : null;
+  }
+  const n = Number.parseInt(t, 10);
+  if (Number.isFinite(n)) {
+    // Heuristic: if user writes 1..N treat as 1-based, else allow 0-based
+    if (n >= 1 && n <= optionCount) return n - 1;
+    if (n >= 0 && n < optionCount) return n;
+  }
+  return null;
+}
+
+function parseOptionsPart(raw) {
+  if (!raw) return [];
+  // Allow either ";" or "," separators
+  return String(raw)
+    .split(/[;,]/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Bulk format (one question per line).
+ * Supported:
+ * - "Question text"
+ * - "Question text | A;B;C;D | B"
+ * - "Question text | A;*B;C;D"  (prefix * marks correct)
+ */
+function parseBulkQuestions(text) {
+  return String(text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split('|').map((p) => p.trim()).filter((p) => p !== '');
+      const questionText = parts[0] || '';
+      const rawOptions = parts[1];
+      const rawCorrect = parts[2];
+
+      if (!rawOptions) {
+        return { questionText };
+      }
+
+      const optionStrings = parseOptionsPart(rawOptions);
+      const starredIdx = optionStrings.findIndex((s) => s.startsWith('*'));
+      const cleaned = optionStrings.map((s) => (s.startsWith('*') ? s.slice(1).trim() : s));
+      const correctIdxFromToken = parseCorrectToken(rawCorrect, cleaned.length);
+      const correctIdx =
+        correctIdxFromToken != null
+          ? correctIdxFromToken
+          : starredIdx !== -1
+            ? starredIdx
+            : 0;
+
+      const options = cleaned.map((opt, idx) => ({
+        optionText: opt,
+        isCorrect: idx === correctIdx,
+      }));
+
+      return { questionText, options };
+    })
+    .filter((q) => q.questionText);
+}
+
+function createBulkItem() {
+  return {
+    questionText: '',
+    options: MC_DEFAULTS(),
+  };
+}
+
+function safeJsonParse(raw) {
+  try {
+    return { ok: true, value: JSON.parse(raw) };
+  } catch (e) {
+    return { ok: false, error: e };
+  }
+}
+
+function normalizeMcqOptions(options) {
+  const nonBlank = (options || [])
+    .map((o) => ({ optionText: String(o?.optionText ?? '').trim(), isCorrect: !!o?.isCorrect }))
+    .filter((o) => o.optionText);
+  const correctCount = nonBlank.filter((o) => o.isCorrect).length;
+  if (nonBlank.length >= 2 && correctCount === 1) return { ok: true, options: nonBlank };
+  // If user has exactly one correct among all options (including blanks), try to preserve it after trimming
+  if (nonBlank.length >= 2 && correctCount === 0) {
+    // default first as correct to avoid backend rejection only if caller wants auto-fix
+    return { ok: false, options: nonBlank, reason: 'Pick exactly one correct option.' };
+  }
+  if (nonBlank.length < 2) {
+    return { ok: false, options: nonBlank, reason: 'Provide at least 2 non-empty options.' };
+  }
+  return { ok: false, options: nonBlank, reason: 'Mark exactly 1 correct option.' };
+}
+
 function QuestionFormFields({
   form,
   setForm,
@@ -52,6 +155,7 @@ function QuestionFormFields({
   audioUploading,
   setAudioUploading,
   toast,
+  requireQuestionText = true,
 }) {
   const selectedSection = useMemo(
     () => sections.find((s) => String(s.id) === String(form.sectionId)),
@@ -100,11 +204,16 @@ function QuestionFormFields({
     try {
       const res = await aiApi.imageOcrTts(file);
       const data = res.data?.data || {};
+      const parsedChoices = (data.choices || []).map((choice, idx) => ({
+        optionText: choice || '',
+        isCorrect: idx === 0,
+      }));
       setForm((f) => ({
         ...f,
         listeningAudioUrl: data.audioUrl || f.listeningAudioUrl,
         transcript: data.extractedText || f.transcript,
-        questionText: f.questionText?.trim() ? f.questionText : (data.extractedText || ''),
+        questionText: data.questionText || data.extractedText || f.questionText,
+        options: parsedChoices.length >= 2 ? parsedChoices : f.options,
       }));
       toast.success('Image OCR + TTS completed.');
     } catch (err) {
@@ -119,6 +228,27 @@ function QuestionFormFields({
     form.listeningAudioUrl && !form.listeningAudioUrl.startsWith('http')
       ? `${API_ORIGIN}${form.listeningAudioUrl.startsWith('/') ? '' : '/'}${form.listeningAudioUrl}`
       : form.listeningAudioUrl;
+
+  const generateTtsFromText = async () => {
+    const text = form.questionText?.trim();
+    if (!text) {
+      toast.error('Enter question text first.');
+      return;
+    }
+    setAudioUploading(true);
+    try {
+      const res = await aiApi.tts(text);
+      const audioUrl = res.data?.data?.audioUrl;
+      if (!audioUrl) throw new Error('No audio URL returned.');
+      setForm((f) => ({ ...f, listeningAudioUrl: audioUrl }));
+      toast.success('TTS audio generated.');
+    } catch (err) {
+      const msg = err?.response?.data?.message || err.message || 'TTS generation failed.';
+      toast.error(msg);
+    } finally {
+      setAudioUploading(false);
+    }
+  };
 
   return (
     <>
@@ -167,7 +297,7 @@ function QuestionFormFields({
           value={form.questionText}
           onChange={(e) => setForm((f) => ({ ...f, questionText: e.target.value }))}
           rows={3}
-          required
+          required={requireQuestionText}
           className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
         />
       </div>
@@ -218,6 +348,9 @@ function QuestionFormFields({
               />
               OCR + TTS from image
             </label>
+            <Button type="button" variant="ghost" size="sm" onClick={generateTtsFromText} disabled={audioUploading}>
+              Generate TTS from question text
+            </Button>
           </div>
           <p className="text-xs text-slate-500">Recommended format: MP3.</p>
           {audioUploading && <p className="text-xs text-slate-500">Uploading…</p>}
@@ -308,6 +441,11 @@ function AddQuestionModal({ examId, onClose, onSuccess }) {
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(false);
   const [audioUploading, setAudioUploading] = useState(false);
+  const [bulkText, setBulkText] = useState('');
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkTab, setBulkTab] = useState('EDITOR'); // EDITOR | LINES | JSON
+  const [bulkItems, setBulkItems] = useState([createBulkItem()]);
+  const [bulkJson, setBulkJson] = useState('');
   const toast = useToast();
 
   const loadSections = useCallback(() => {
@@ -364,8 +502,75 @@ function AddQuestionModal({ examId, onClose, onSuccess }) {
     };
     setLoading(true);
     try {
-      await questionApi.create(payload);
-      toast.success('Question added.');
+      if (bulkMode) {
+        let items = [];
+        if (bulkTab === 'LINES') {
+          items = parseBulkQuestions(bulkText);
+        } else if (bulkTab === 'JSON') {
+          const parsed = safeJsonParse(bulkJson);
+          if (!parsed.ok) {
+            toast.error('Invalid JSON. Please paste a valid JSON array.');
+            setLoading(false);
+            return;
+          }
+          if (!Array.isArray(parsed.value)) {
+            toast.error('JSON must be an array of questions.');
+            setLoading(false);
+            return;
+          }
+          items = parsed.value
+            .map((q) => ({
+              questionText: String(q?.questionText ?? '').trim(),
+              options: Array.isArray(q?.options)
+                ? q.options.map((o) => ({
+                    optionText: String(o?.optionText ?? ''),
+                    isCorrect: !!o?.isCorrect,
+                  }))
+                : undefined,
+            }))
+            .filter((q) => q.questionText);
+        } else {
+          // EDITOR
+          items = bulkItems
+            .map((q) => ({
+              questionText: String(q?.questionText ?? '').trim(),
+              options: q?.options,
+            }))
+            .filter((q) => q.questionText);
+        }
+
+        if (items.length === 0) {
+          toast.error('Add at least one question.');
+          setLoading(false);
+          return;
+        }
+
+        if (form.questionType === QUESTION_TYPES.MULTIPLE_CHOICE || form.questionType === QUESTION_TYPES.LISTENING) {
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const res = normalizeMcqOptions(item.options ?? payload.options);
+            if (!res.ok) {
+              toast.error(`Question #${i + 1}: ${res.reason}`);
+              setLoading(false);
+              return;
+            }
+          }
+        }
+
+        const bulkPayload = items.map((item) => ({
+          ...payload,
+          questionText: item.questionText,
+          options:
+            form.questionType === QUESTION_TYPES.MULTIPLE_CHOICE || form.questionType === QUESTION_TYPES.LISTENING
+              ? normalizeMcqOptions(item.options ?? payload.options).options
+              : undefined,
+        }));
+        await questionApi.createBulk(bulkPayload);
+        toast.success(`${items.length} questions added.`);
+      } else {
+        await questionApi.create(payload);
+        toast.success('Question added.');
+      }
       onSuccess();
     } catch (err) {
       const msg = err?.response?.data?.message || 'Failed to add question.';
@@ -390,6 +595,12 @@ function AddQuestionModal({ examId, onClose, onSuccess }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" checked={bulkMode} onChange={(e) => setBulkMode(e.target.checked)} />
+          Bulk mode (add multiple questions)
+        </label>
+      </div>
       <QuestionFormFields
         form={form}
         setForm={setForm}
@@ -398,13 +609,252 @@ function AddQuestionModal({ examId, onClose, onSuccess }) {
         audioUploading={audioUploading}
         setAudioUploading={setAudioUploading}
         toast={toast}
+        requireQuestionText={!bulkMode}
       />
+      {bulkMode && (
+        <div>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => setBulkTab('EDITOR')}
+              className={`px-3 py-2 rounded-xl text-xs font-semibold border transition ${
+                bulkTab === 'EDITOR' ? 'bg-white border-blue-200 text-blue-700' : 'bg-white/60 border-slate-200 text-slate-600 hover:border-blue-200'
+              }`}
+            >
+              Editor (recommended)
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkTab('JSON')}
+              className={`px-3 py-2 rounded-xl text-xs font-semibold border transition ${
+                bulkTab === 'JSON' ? 'bg-white border-blue-200 text-blue-700' : 'bg-white/60 border-slate-200 text-slate-600 hover:border-blue-200'
+              }`}
+            >
+              Paste JSON
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkTab('LINES')}
+              className={`px-3 py-2 rounded-xl text-xs font-semibold border transition ${
+                bulkTab === 'LINES' ? 'bg-white border-blue-200 text-blue-700' : 'bg-white/60 border-slate-200 text-slate-600 hover:border-blue-200'
+              }`}
+            >
+              Line import
+            </button>
+          </div>
+
+          {bulkTab === 'EDITOR' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-700">Questions</p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setBulkItems((xs) => [...xs, createBulkItem()])}
+                >
+                  + Add question
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {bulkItems.map((q, idx) => (
+                  <div key={idx} className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1">
+                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                          Question {idx + 1}
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={q.questionText}
+                          onChange={(e) =>
+                            setBulkItems((xs) =>
+                              xs.map((it, j) => (j === idx ? { ...it, questionText: e.target.value } : it)),
+                            )
+                          }
+                          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          placeholder="Type the question…"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBulkItems((xs) => xs.filter((_, j) => j !== idx))}
+                        className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 transition"
+                        title="Remove"
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    {(form.questionType === QUESTION_TYPES.MULTIPLE_CHOICE || form.questionType === QUESTION_TYPES.LISTENING) && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Answer options</p>
+                        <div className="space-y-2">
+                          {(q.options || []).map((opt, oi) => (
+                            <div key={oi} className="flex items-center gap-2">
+                              <input
+                                value={opt.optionText}
+                                onChange={(e) =>
+                                  setBulkItems((xs) =>
+                                    xs.map((it, j) => {
+                                      if (j !== idx) return it;
+                                      const next = (it.options || []).map((o, k) =>
+                                        k === oi ? { ...o, optionText: e.target.value } : o,
+                                      );
+                                      return { ...it, options: next };
+                                    }),
+                                  )
+                                }
+                                placeholder={`Option ${oi + 1}`}
+                                className="flex-1 px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                              <label className="flex items-center gap-1.5 text-xs text-slate-600 whitespace-nowrap">
+                                <input
+                                  type="radio"
+                                  name={`bulk-correct-${idx}`}
+                                  checked={!!opt.isCorrect}
+                                  onChange={() =>
+                                    setBulkItems((xs) =>
+                                      xs.map((it, j) => {
+                                        if (j !== idx) return it;
+                                        const next = (it.options || []).map((o, k) => ({ ...o, isCorrect: k === oi }));
+                                        return { ...it, options: next };
+                                      }),
+                                    )
+                                  }
+                                  className="accent-blue-600"
+                                />
+                                Correct
+                              </label>
+                            </div>
+                          ))}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setBulkItems((xs) =>
+                                xs.map((it, j) => {
+                                  if (j !== idx) return it;
+                                  const next = [...(it.options || []), { optionText: '', isCorrect: false }];
+                                  return { ...it, options: next };
+                                }),
+                              )
+                            }
+                          >
+                            + Add option
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {bulkTab === 'JSON' && (
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700">Paste JSON array</label>
+              <textarea
+                rows={10}
+                value={bulkJson}
+                onChange={(e) => setBulkJson(e.target.value)}
+                placeholder={`[\n  {\n    "questionText": "What is 2 + 2?",\n    "options": [\n      { "optionText": "3", "isCorrect": false },\n      { "optionText": "4", "isCorrect": true }\n    ]\n  }\n]`}
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm font-mono resize-y"
+              />
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const parsed = safeJsonParse(bulkJson);
+                    if (!parsed.ok) {
+                      toast.error('Invalid JSON.');
+                      return;
+                    }
+                    if (!Array.isArray(parsed.value)) {
+                      toast.error('JSON must be an array.');
+                      return;
+                    }
+                    const items = parsed.value
+                      .map((q) => ({
+                        questionText: String(q?.questionText ?? ''),
+                        options: Array.isArray(q?.options)
+                          ? q.options.map((o) => ({ optionText: String(o?.optionText ?? ''), isCorrect: !!o?.isCorrect }))
+                          : MC_DEFAULTS(),
+                      }))
+                      .filter((q) => String(q.questionText).trim());
+                    if (items.length === 0) {
+                      toast.error('No questions found in JSON.');
+                      return;
+                    }
+                    setBulkItems(items);
+                    setBulkTab('EDITOR');
+                    toast.success(`Loaded ${items.length} questions into editor.`);
+                  }}
+                >
+                  Load into editor
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {bulkTab === 'LINES' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">Question lines</label>
+              <textarea
+                rows={8}
+                value={bulkText}
+                onChange={(e) => setBulkText(e.target.value)}
+                placeholder={
+                  'What is 2 + 2? | 3;4;5;6 | B\n' +
+                  'Capital of France? | London;Berlin;*Paris;Rome\n' +
+                  'A short writing prompt (no options)'
+                }
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm resize-y"
+              />
+              <p className="text-xs text-slate-500 mt-1.5">
+                Optional format: <span className="font-mono">Question | A;B;C;D | B</span> or mark correct with{' '}
+                <span className="font-mono">*</span> like <span className="font-mono">A;*B;C;D</span>.
+              </p>
+              <div className="flex justify-end mt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    const rows = parseBulkQuestions(bulkText);
+                    if (rows.length === 0) {
+                      toast.error('No valid questions found.');
+                      return;
+                    }
+                    const items = rows.map((r) => ({
+                      questionText: r.questionText,
+                      options: r.options
+                        ? r.options.map((o) => ({ optionText: String(o.optionText ?? ''), isCorrect: !!o.isCorrect }))
+                        : MC_DEFAULTS(),
+                    }));
+                    setBulkItems(items);
+                    setBulkTab('EDITOR');
+                    toast.success(`Loaded ${items.length} questions into editor.`);
+                  }}
+                >
+                  Load into editor
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <div className="flex gap-3 justify-end">
         <Button variant="secondary" type="button" onClick={onClose}>
           Cancel
         </Button>
         <Button variant="primary" type="submit" loading={loading}>
-          Add Question
+          {bulkMode ? 'Add Questions' : 'Add Question'}
         </Button>
       </div>
     </form>
@@ -490,6 +940,7 @@ function EditQuestionModal({ question, onClose, onSuccess }) {
         audioUploading={audioUploading}
         setAudioUploading={setAudioUploading}
         toast={toast}
+        requireQuestionText
       />
       <div className="flex gap-3 justify-end">
         <Button variant="secondary" type="button" onClick={onClose}>

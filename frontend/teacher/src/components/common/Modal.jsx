@@ -29,7 +29,10 @@ export default function Modal({ isOpen, onClose, title, children, maxWidth = 'ma
             </button>
           </div>
         )}
-        <div className="px-6 py-5">{children}</div>
+        {/* Scrollable body so long forms keep actions reachable */}
+        <div className="px-6 py-5 overflow-y-auto max-h-[75vh]">
+          {children}
+        </div>
       </div>
       <style>{`@keyframes fadeInUp { from { opacity:0; transform: translateY(12px) scale(0.97); } to { opacity:1; transform: translateY(0) scale(1); } }`}</style>
     </div>
