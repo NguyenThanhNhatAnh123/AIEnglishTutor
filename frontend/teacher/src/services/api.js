@@ -123,6 +123,11 @@ export const aiApi = {
       answerId,
       audioUrl,
     }),
+  scoreWriting: (answerId, essayText) =>
+    api.post('/ai/score-writing', {
+      answerId,
+      essayText,
+    }),
   tts: (text) => api.post('/ai/tts', { text }),
 };
 
@@ -130,6 +135,7 @@ export const submissionApi = {
   getByExamId: (examId) => api.get('/submissions', { params: { examId } }),
   getById: (id) => api.get(`/submissions/${id}`),
   getAnswers: (id) => api.get(`/submissions/${id}/answers`),
+  getAnswersBatch: (submissionIds) => api.get('/submissions/answers', { params: { submissionId: submissionIds } }),
   delete: (id) => api.delete(`/submissions/${id}`),
   downloadSpeaking: (submissionId, answerId) =>
     api.get(`/submissions/${submissionId}/answers/${answerId}/speaking`, { responseType: 'blob' }),

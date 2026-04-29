@@ -27,14 +27,14 @@ public class AiController {
     private final ImageOcrTtsService imageOcrTtsService;
 
     @PostMapping("/score-writing")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN', 'STUDENT')")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<ApiResponse<AiScoreResponse>> scoreWriting(@Valid @RequestBody WritingScoreRequest request) {
         AiScoreResponse response = aiScoringService.scoreWriting(request);
         return ResponseEntity.ok(ApiResponse.success("Writing scored", response));
     }
 
     @PostMapping("/score-speaking")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN', 'STUDENT')")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<ApiResponse<AiScoreResponse>> scoreSpeaking(@Valid @RequestBody SpeakingScoreRequest request) {
         AiScoreResponse response = aiScoringService.scoreSpeaking(request);
         return ResponseEntity.ok(ApiResponse.success("Speaking scored", response));

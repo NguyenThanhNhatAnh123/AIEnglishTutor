@@ -10,5 +10,7 @@ import java.util.Optional;
 public interface AiResultRepository extends JpaRepository<AiResult, Integer> {
     Optional<AiResult> findByAnswer(Answer answer);
 
+    List<AiResult> findByAnswerIn(List<Answer> answers);
+
     void deleteByAnswerIn(List<Answer> answers);
 }

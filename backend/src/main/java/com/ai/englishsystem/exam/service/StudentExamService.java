@@ -24,9 +24,12 @@ import com.ai.englishsystem.submission.dto.SubmitExamRequest;
 import com.ai.englishsystem.submission.dto.SubmissionResponse;
 import com.ai.englishsystem.submission.entity.Answer;
 import com.ai.englishsystem.submission.entity.Submission;
+import com.ai.englishsystem.submission.entity.SubmissionSuspiciousEvent;
 import com.ai.englishsystem.submission.entity.SubmissionStatus;
+import com.ai.englishsystem.submission.entity.SuspiciousEventType;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
 import com.ai.englishsystem.submission.repository.SubmissionRepository;
+import com.ai.englishsystem.submission.repository.SubmissionSuspiciousEventRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -53,9 +56,10 @@ public class StudentExamService {
     private final StudentRepository studentRepository;
     private final ScoreRepository scoreRepository;
     private final AiScoringService aiScoringService;
+    private final SubmissionSuspiciousEventRepository submissionSuspiciousEventRepository;
 
     /**
-     * Returns only ACTIVE exams for students — never exposes DRAFT/CLOSED.
+     * Returns only ACTIVE exams for students - never exposes DRAFT/CLOSED.
      */
     @Transactional(readOnly = true)
     public List<ExamResponse> getActiveExams() {
@@ -163,10 +167,18 @@ public class StudentExamService {
         if (!pastDeadline && completion.totalQuestions() > 0
                 && completion.completionRatio() < MIN_REQUIRED_COMPLETION_RATIO) {
             int required = (int) Math.ceil(completion.totalQuestions() * MIN_REQUIRED_COMPLETION_RATIO);
-            throw new BadRequestException(
-                    "Bạn cần làm ít nhất 50% số câu trước khi nộp bài ("
-                            + completion.answeredQuestions() + "/" + completion.totalQuestions()
-                            + "). Tối thiểu cần " + required + " câu.");
+            String minimumCompletionMessage = "You must answer at least 50% of the questions before submitting ("
+                    + completion.answeredQuestions() + "/" + completion.totalQuestions()
+                    + "). Minimum required: " + required + " questions.";
+            throw new BadRequestException(minimumCompletionMessage);
+
+
+
+
+
+
+
+
         }
 
         SubmissionStatus finalStatus = pastDeadline ? SubmissionStatus.AUTO_SUBMITTED : SubmissionStatus.SUBMITTED;
@@ -197,6 +209,7 @@ public class StudentExamService {
 
         submission.setStatus(finalStatus);
         submission = submissionRepository.save(submission);
+        persistSuspiciousEventSnapshot(submission);
 
         if (submission.getExamAttempt() != null) {
             ExamAttempt attempt = submission.getExamAttempt();
@@ -444,6 +457,26 @@ public class StudentExamService {
         return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
     }
 
+    private void persistSuspiciousEventSnapshot(Submission submission) {
+        submissionSuspiciousEventRepository.deleteBySubmission(submission);
+        saveSuspiciousEvent(submission, SuspiciousEventType.TAB_SWITCH, submission.getTabSwitchCount());
+        saveSuspiciousEvent(submission, SuspiciousEventType.FOCUS_LOSS, submission.getFocusLossCount());
+        saveSuspiciousEvent(submission, SuspiciousEventType.COPY_PASTE, submission.getCopyPasteCount());
+    }
+
+    private void saveSuspiciousEvent(Submission submission, SuspiciousEventType eventType, Integer count) {
+        int normalized = nonNegative(count);
+        if (normalized <= 0) {
+            return;
+        }
+        submissionSuspiciousEventRepository.save(SubmissionSuspiciousEvent.builder()
+                .submission(submission)
+                .student(submission.getStudent())
+                .eventType(eventType)
+                .eventCount(normalized)
+                .build());
+    }
+
     private float[] scoreMcqAndListening(Exam exam, List<Answer> answers) {
         float earned = 0f;
         float max = 0f;
@@ -590,3 +623,4 @@ public class StudentExamService {
         }
     }
 }
+

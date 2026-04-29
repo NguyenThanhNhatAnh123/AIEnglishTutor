@@ -18,6 +18,10 @@ public interface AnswerRepository extends JpaRepository<Answer, Integer> {
     @Query("SELECT a FROM Answer a WHERE a.submission = :sub")
     List<Answer> findBySubmissionFetchQuestion(@Param("sub") Submission submission);
 
+    @EntityGraph(attributePaths = {"question", "submission"})
+    @Query("SELECT a FROM Answer a WHERE a.submission.id IN :submissionIds")
+    List<Answer> findBySubmissionIdInFetchQuestion(@Param("submissionIds") List<Integer> submissionIds);
+
     Optional<Answer> findBySubmissionAndQuestion(Submission submission, Question question);
 
     @Query("""

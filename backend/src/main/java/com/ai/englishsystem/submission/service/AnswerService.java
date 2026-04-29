@@ -1,6 +1,8 @@
 package com.ai.englishsystem.submission.service;
 
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.ai.englishsystem.common.exception.BadRequestException;
@@ -171,21 +173,55 @@ public class AnswerService {
         Submission submission = submissionRepository.findWithAssociationsById(submissionId)
                 .orElseThrow(() -> new NotFoundException("Submission", submissionId));
 
+        assertTeacherCanAccess(submission);
+
+        return answerRepository.findBySubmissionFetchQuestion(submission).stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Teacher/Admin: batch answers for a submission table without N+1 HTTP requests.
+     */
+    @Transactional(readOnly = true)
+    public Map<Integer, List<AnswerResponse>> getAnswersForTeacherBatch(List<Integer> submissionIds) {
+        if (submissionIds == null || submissionIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<Submission> submissions = submissionRepository.findAllWithAssociationsByIdIn(submissionIds);
+        for (Submission submission : submissions) {
+            assertTeacherCanAccess(submission);
+        }
+
+        Map<Integer, List<AnswerResponse>> grouped = answerRepository.findBySubmissionIdInFetchQuestion(submissionIds).stream()
+                .map(this::toResponse)
+                .collect(Collectors.groupingBy(AnswerResponse::getSubmissionId));
+
+        for (Integer submissionId : submissionIds) {
+            grouped.computeIfAbsent(submissionId, ignored -> List.of());
+        }
+
+        grouped.replaceAll((ignored, answers) -> answers.stream()
+                .sorted(Comparator.comparing(AnswerResponse::getQuestionId, Comparator.nullsLast(Integer::compareTo)))
+                .collect(Collectors.toList()));
+
+        return grouped;
+    }
+
+    private void assertTeacherCanAccess(Submission submission) {
         if (SecurityUtils.hasRole("ADMIN")) {
-            // ok
-        } else if (SecurityUtils.hasRole("TEACHER")) {
+            return;
+        }
+        if (SecurityUtils.hasRole("TEACHER")) {
             Integer currentUserId = SecurityUtils.getCurrentUserId();
             Integer ownerUserId = submission.getExam().getTeacher().getUser().getId();
             if (!currentUserId.equals(ownerUserId)) {
                 throw new ForbiddenException("You do not have permission to view this submission");
             }
-        } else {
-            throw new ForbiddenException("Not allowed");
+            return;
         }
-
-        return answerRepository.findBySubmissionFetchQuestion(submission).stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+        throw new ForbiddenException("Not allowed");
     }
 
     private AnswerResponse toResponse(Answer answer) {

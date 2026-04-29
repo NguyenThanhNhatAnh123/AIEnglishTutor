@@ -18,6 +18,13 @@ public class ScoreResponse {
     private Float writingScore;
     private Float speakingScore;
     private Float totalScore;
+    private String feedback;
+    private Integer tabSwitchCount;
+    private Integer focusLossCount;
+    private Integer copyPasteCount;
+    private Integer suspiciousEventCount;
+    private String deviceType;
+    private String deviceLabel;
     private Integer gradedBy;
     private LocalDateTime gradedAt;
 }

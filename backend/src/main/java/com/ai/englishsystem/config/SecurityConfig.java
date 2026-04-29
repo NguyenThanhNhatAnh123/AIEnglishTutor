@@ -43,8 +43,9 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/media/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/media/files/**").permitAll()
                         .requestMatchers("/uploads/audio/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/media/upload").hasAnyRole("TEACHER", "ADMIN")
                         // FIX: allow preflight OPTIONS for all endpoints (CORS)
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated()

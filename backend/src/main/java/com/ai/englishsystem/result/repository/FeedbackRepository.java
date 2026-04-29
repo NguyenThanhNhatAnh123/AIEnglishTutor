@@ -10,5 +10,7 @@ import java.util.Optional;
 public interface FeedbackRepository extends JpaRepository<Feedback, Integer> {
     Optional<Feedback> findByAnswer(Answer answer);
 
+    List<Feedback> findByAnswerIn(List<Answer> answers);
+
     void deleteByAnswerIn(List<Answer> answers);
 }

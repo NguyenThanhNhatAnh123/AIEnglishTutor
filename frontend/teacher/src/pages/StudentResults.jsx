@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { examApi, submissionApi, scoreApi, aiApi, API_ORIGIN } from '../services/api';
 import Layout from '../components/Layout';
 import Badge from '../components/common/Badge';
@@ -17,7 +17,7 @@ function resolveMediaSrc(url) {
 }
 
 function formatDurationSeconds(sec) {
-  if (sec == null || Number.isNaN(sec)) return '—';
+  if (sec == null || Number.isNaN(sec)) return '-';
   const n = Math.max(0, Math.floor(sec));
   const m = Math.floor(n / 60);
   const s = n % 60;
@@ -31,6 +31,13 @@ function speakingAnswers(list) {
     if (t !== 'SPEAKING') return false;
     const u = a.speakingAudioUrl;
     return typeof u === 'string' && u.length > 0;
+  });
+}
+
+function writingAnswers(list) {
+  return (list || []).filter((a) => {
+    const t = (a.questionType || '').toUpperCase();
+    return t === 'WRITING' && typeof a.answerText === 'string' && a.answerText.trim().length > 0;
   });
 }
 
@@ -73,6 +80,7 @@ function ScoreDetailModal({ submission, onClose }) {
   const [answers, setAnswers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [scoringAnswerId, setScoringAnswerId] = useState(null);
+  const [reviewingAnswerId, setReviewingAnswerId] = useState(null);
   const toast = useToast();
 
   useEffect(() => {
@@ -126,8 +134,35 @@ function ScoreDetailModal({ submission, onClose }) {
     }
   };
 
+  const runQuickWritingReview = async (answer) => {
+    if (!answer?.id || !answer?.answerText) {
+      toast.error('Missing writing answer text.');
+      return;
+    }
+    try {
+      setReviewingAnswerId(answer.id);
+      const res = await aiApi.scoreWriting(answer.id, answer.answerText);
+      const ai = res.data?.data;
+      toast.success(
+        ai?.overallScore != null
+          ? `AI reviewed writing: ${Number(ai.overallScore).toFixed(1)}/10`
+          : 'AI writing review completed.'
+      );
+      try {
+        const latestScore = await scoreApi.getBySubmissionId(submission.id);
+        setScore(latestScore.data?.data ?? score);
+      } catch {
+        // no-op: keep current score block
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Quick writing review failed.');
+    } finally {
+      setReviewingAnswerId(null);
+    }
+  };
+
   return (
-    <Modal isOpen onClose={onClose} title={`Score – ${submission.studentName || `Student #${submission.studentId}`}`} maxWidth="max-w-lg">
+    <Modal isOpen onClose={onClose} title={`Score - ${submission.studentName || `Student #${submission.studentId}`}`} maxWidth="max-w-lg">
       {loading ? <PageLoader /> : !score ? (
         <p className="text-slate-400 text-sm">Score not yet available for this submission.</p>
       ) : (
@@ -169,8 +204,27 @@ function ScoreDetailModal({ submission, onClose }) {
                     Download MP3
                   </button>
                   {a.speakingDurationSeconds != null && (
-                    <p className="text-xs text-slate-400">{a.speakingDurationSeconds}s · {a.speakingFormat || 'mp3'}</p>
+                    <p className="text-xs text-slate-400">{a.speakingDurationSeconds}s / {a.speakingFormat || 'mp3'}</p>
                   )}
+                </div>
+              ))}
+            </div>
+          )}
+          {writingAnswers(answers).length > 0 && (
+            <div className="rounded-xl border border-slate-100 p-4 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Writing</p>
+              {writingAnswers(answers).map((a) => (
+                <div key={a.id} className="space-y-2">
+                  <p className="text-xs text-slate-400">Question #{a.questionId}</p>
+                  <p className="text-xs text-slate-600 line-clamp-3">{a.answerText}</p>
+                  <button
+                    type="button"
+                    className="text-xs text-purple-700 hover:underline"
+                    disabled={reviewingAnswerId === a.id}
+                    onClick={() => runQuickWritingReview(a)}
+                  >
+                    {reviewingAnswerId === a.id ? 'Reviewing...' : 'Quick AI review'}
+                  </button>
                 </div>
               ))}
             </div>
@@ -182,8 +236,8 @@ function ScoreDetailModal({ submission, onClose }) {
             </div>
           )}
           <div className="text-xs text-slate-400 space-y-1">
-            <p>Started: {submission.startTime ? new Date(submission.startTime).toLocaleString() : '—'}</p>
-            <p>Ended: {submission.endTime ? new Date(submission.endTime).toLocaleString() : (submission.submitTime ? new Date(submission.submitTime).toLocaleString() : '—')}</p>
+            <p>Started: {submission.startTime ? new Date(submission.startTime).toLocaleString() : '-'}</p>
+            <p>Ended: {submission.endTime ? new Date(submission.endTime).toLocaleString() : (submission.submitTime ? new Date(submission.submitTime).toLocaleString() : '-')}</p>
             <p>Time spent: {formatDurationSeconds(submission.durationSeconds)}</p>
           </div>
         </div>
@@ -196,7 +250,7 @@ export default function StudentResults() {
   const [exams, setExams] = useState([]);
   const [selectedExamId, setSelectedExamId] = useState('');
   const [submissions, setSubmissions] = useState([]);
-  const [loadingSubs, setLoadingSubs] = useState(false);
+  const [loadedExamId, setLoadedExamId] = useState('');
   const [selectedSub, setSelectedSub] = useState(null);
   const [search, setSearch] = useState('');
   const [answerMap, setAnswerMap] = useState({});
@@ -217,41 +271,46 @@ export default function StudentResults() {
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset dependent state when exam changes
-    if (!selectedExamId) { setSubmissions([]); return; }
-    setLoadingSubs(true);
+    if (!selectedExamId || loadedExamId === selectedExamId) return;
+    let cancelled = false;
     submissionApi.getByExamId(parseInt(selectedExamId))
-      .then((r) => setSubmissions(r.data?.data || []))
+      .then((r) => {
+        if (!cancelled) {
+          setSubmissions(r.data?.data || []);
+          setLoadedExamId(selectedExamId);
+        }
+      })
       .catch((err) => {
-        setSubmissions([]);
+        if (!cancelled) {
+          setSubmissions([]);
+          setLoadedExamId(selectedExamId);
+        }
         if (err.response?.status === 403) {
-          // Teacher doesn't own this exam — backend enforces ownership
+          // Teacher doesn't own this exam - backend enforces ownership
           alert('You do not have permission to view submissions for this exam.');
         }
       })
-      .finally(() => setLoadingSubs(false));
-  }, [selectedExamId]);
+    return () => { cancelled = true; };
+  }, [loadedExamId, selectedExamId]);
+
+  const loadingSubs = Boolean(selectedExamId) && loadedExamId !== selectedExamId;
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- clear cached answers when list empties
     if (!submissions.length) {
-      setAnswerMap({});
       return;
     }
     let cancelled = false;
     (async () => {
-      const map = {};
-      await Promise.all(
-        submissions.map(async (s) => {
-          try {
-            const r = await submissionApi.getAnswers(s.id);
-            map[s.id] = r.data?.data || [];
-          } catch {
-            map[s.id] = [];
-          }
-        })
-      );
-      if (!cancelled) setAnswerMap(map);
+      try {
+        const r = await submissionApi.getAnswersBatch(submissions.map((s) => s.id));
+        if (!cancelled) setAnswerMap(r.data?.data || {});
+      } catch {
+        if (!cancelled) {
+          const fallback = {};
+          submissions.forEach((s) => { fallback[s.id] = []; });
+          setAnswerMap(fallback);
+        }
+      }
     })();
     return () => { cancelled = true; };
   }, [submissions]);
@@ -329,7 +388,7 @@ export default function StudentResults() {
             <div className="px-4 py-3 border-b border-slate-100">
               <p className="text-sm font-semibold text-slate-700">
                 {filtered.length} submission{filtered.length !== 1 ? 's' : ''}
-                {selectedExamTitle ? ` · ${selectedExamTitle}` : ''}
+                {selectedExamTitle ? ` - ${selectedExamTitle}` : ''}
               </p>
             </div>
             <div className="overflow-x-auto">
@@ -353,8 +412,8 @@ export default function StudentResults() {
                   <tr key={s.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800">{s.studentName || `Student #${s.studentId}`}</td>
                     <td className="px-4 py-3"><Badge status={s.status} label={s.status} /></td>
-                    <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">{s.startTime ? new Date(s.startTime).toLocaleString() : '—'}</td>
-                    <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">{(s.endTime || s.submitTime) ? new Date(s.endTime || s.submitTime).toLocaleString() : '—'}</td>
+                    <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">{s.startTime ? new Date(s.startTime).toLocaleString() : '-'}</td>
+                    <td className="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">{(s.endTime || s.submitTime) ? new Date(s.endTime || s.submitTime).toLocaleString() : '-'}</td>
                     <td className="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">{formatDurationSeconds(s.durationSeconds)}</td>
                     <td className="px-4 py-3 text-slate-600 text-xs whitespace-nowrap">{formatCompletion(s)}</td>
                     <td className="px-4 py-3 text-slate-600 text-xs max-w-[240px]">
@@ -367,7 +426,7 @@ export default function StudentResults() {
                     </td>
                     <td className="px-4 py-3 align-top">
                       {speakingAnswers(answerMap[s.id]).length === 0 ? (
-                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-400">-</span>
                       ) : (
                         <div className="flex flex-col gap-2 max-w-[220px]">
                           {speakingAnswers(answerMap[s.id]).map((a) => (
@@ -389,7 +448,7 @@ export default function StudentResults() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-center font-bold text-blue-700">{s.totalScore ?? '—'}</td>
+                    <td className="px-4 py-3 text-center font-bold text-blue-700">{s.totalScore ?? '-'}</td>
                     <td className="px-4 py-3 text-right space-x-1">
                       <Button variant="ghost" size="sm" onClick={() => setSelectedSub(s)}>View</Button>
                       <Button
@@ -427,3 +486,4 @@ export default function StudentResults() {
     </Layout>
   );
 }
+

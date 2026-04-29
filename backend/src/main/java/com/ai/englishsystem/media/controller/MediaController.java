@@ -8,6 +8,7 @@ import org.springframework.core.io.UrlResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,9 +25,9 @@ public class MediaController {
 
     /**
      * Upload an audio file. Returns { url: "/api/media/files/xxx.webm" }.
-     * Public access is already configured in SecurityConfig for /api/media/**.
      */
     @PostMapping("/upload")
+    @PreAuthorize("hasAnyRole('TEACHER','ADMIN')")
     public ResponseEntity<ApiResponse<Map<String, String>>> upload(@RequestParam("file") MultipartFile file) {
         String url = mediaService.uploadAudio(file);
         return ResponseEntity.ok(ApiResponse.success("File uploaded", Map.of("url", url)));

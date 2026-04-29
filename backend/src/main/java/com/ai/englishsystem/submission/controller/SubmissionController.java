@@ -35,12 +35,29 @@ public class SubmissionController {
         return ResponseEntity.ok(ApiResponse.success(list));
     }
 
+    /** Teacher/Admin/Student: get submission detail (ownership enforced in service). */
+    @GetMapping("/{submissionId}")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN', 'STUDENT')")
+    public ResponseEntity<ApiResponse<SubmissionResponse>> getById(@PathVariable Integer submissionId) {
+        SubmissionResponse response = submissionService.getById(submissionId);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
     /** Teacher/Admin: saved answers (e.g. speaking audio URLs) for review. */
     @GetMapping("/{submissionId}/answers")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<ApiResponse<List<AnswerResponse>>> answersForSubmission(@PathVariable Integer submissionId) {
         List<AnswerResponse> list = answerService.getAnswersForTeacher(submissionId);
         return ResponseEntity.ok(ApiResponse.success(list));
+    }
+
+    /** Teacher/Admin: batch saved answers for review tables. */
+    @GetMapping("/answers")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<java.util.Map<Integer, List<AnswerResponse>>>> answersBatch(
+            @RequestParam("submissionId") List<Integer> submissionIds) {
+        var map = answerService.getAnswersForTeacherBatch(submissionIds);
+        return ResponseEntity.ok(ApiResponse.success(map));
     }
 
     /** Teacher/Admin: download normalized speaking MP3 (requires exam ownership). */

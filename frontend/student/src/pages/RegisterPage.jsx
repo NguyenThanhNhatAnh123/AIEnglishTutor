@@ -5,7 +5,13 @@ import { useToast } from '../context/ToastContext';
 import Button from '../components/common/Button';
 
 export default function RegisterPage() {
-  const [form, setForm] = useState({ username: '', email: '', password: '', confirmPassword: '' });
+  const [form, setForm] = useState({
+    fullName: '',
+    username: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+  });
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const toast = useToast();
@@ -20,7 +26,12 @@ export default function RegisterPage() {
     }
     setLoading(true);
     try {
-      await authApi.register({ username: form.username, email: form.email, password: form.password });
+      await authApi.register({
+        fullName: form.fullName,
+        username: form.username,
+        email: form.email,
+        password: form.password,
+      });
       toast.success('Account created! Please sign in.');
       navigate('/login');
     } catch (err) {
@@ -31,10 +42,11 @@ export default function RegisterPage() {
   };
 
   const fields = [
+    { id: 'fullName', label: 'Full Name', type: 'text', placeholder: 'Nguyen Van A' },
     { id: 'username', label: 'Username', type: 'text', placeholder: 'johndoe' },
     { id: 'email', label: 'Email', type: 'email', placeholder: 'you@example.com' },
-    { id: 'password', label: 'Password', type: 'password', placeholder: '••••••••' },
-    { id: 'confirmPassword', label: 'Confirm Password', type: 'password', placeholder: '••••••••' },
+    { id: 'password', label: 'Password', type: 'password', placeholder: 'Enter your password' },
+    { id: 'confirmPassword', label: 'Confirm Password', type: 'password', placeholder: 'Re-enter your password' },
   ];
 
   return (
@@ -44,15 +56,27 @@ export default function RegisterPage() {
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+              />
             </svg>
           </div>
           <span className="font-bold text-lg">AI English Tutor</span>
         </div>
         <div>
-          <h2 className="text-4xl font-bold leading-tight mb-4">Start your<br />English learning<br />journey today</h2>
-          <p className="text-blue-200 text-lg">Join thousands of students improving their English skills with AI-powered exams and feedback.</p>
+          <h2 className="text-4xl font-bold leading-tight mb-4">
+            Start your
+            <br />
+            English learning
+            <br />
+            journey today
+          </h2>
+          <p className="text-blue-200 text-lg">
+            Join thousands of students improving their English skills with AI-powered exams and feedback.
+          </p>
         </div>
         <ul className="space-y-3">
           {['Instant AI grading on writing & speaking', 'Detailed skill breakdown reports', 'Track your progress over time'].map((item) => (
@@ -95,7 +119,9 @@ export default function RegisterPage() {
 
           <p className="text-center text-sm text-slate-500 mt-6">
             Already have an account?{' '}
-            <Link to="/login" className="text-blue-600 font-medium hover:underline">Sign in</Link>
+            <Link to="/login" className="text-blue-600 font-medium hover:underline">
+              Sign in
+            </Link>
           </p>
         </div>
       </div>

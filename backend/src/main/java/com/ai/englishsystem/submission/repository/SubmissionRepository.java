@@ -29,6 +29,10 @@ public interface SubmissionRepository extends JpaRepository<Submission, Integer>
     @Query("SELECT s FROM Submission s WHERE s.id = :id")
     Optional<Submission> findWithAssociationsById(@Param("id") Integer id);
 
+    @EntityGraph(attributePaths = {"exam", "exam.teacher", "exam.teacher.user", "student", "student.user", "examAttempt"})
+    @Query("SELECT s FROM Submission s WHERE s.id IN :ids")
+    List<Submission> findAllWithAssociationsByIdIn(@Param("ids") List<Integer> ids);
+
     /** Student's own submission history, newest first */
     @EntityGraph(attributePaths = {"exam", "student", "student.user"})
     @Query("SELECT s FROM Submission s WHERE s.student = :student ORDER BY s.startTime DESC")

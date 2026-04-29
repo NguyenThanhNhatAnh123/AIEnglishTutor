@@ -3,20 +3,30 @@ import { scoreApi } from '../services/api';
 
 export default function ScoreChart({ submissionId }) {
   const [score, setScore] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loadedSubmissionId, setLoadedSubmissionId] = useState(null);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset local display state when key prop is cleared
-    if (!submissionId) {
-      setScore(null);
+    if (!submissionId || loadedSubmissionId === submissionId) {
       return;
     }
-    setLoading(true);
+    let cancelled = false;
     scoreApi.getBySubmissionId(submissionId)
-      .then((r) => setScore(r.data?.data))
-      .catch(() => setScore(null))
-      .finally(() => setLoading(false));
-  }, [submissionId]);
+      .then((r) => {
+        if (!cancelled) {
+          setScore(r.data?.data ?? null);
+          setLoadedSubmissionId(submissionId);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setScore(null);
+          setLoadedSubmissionId(submissionId);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [loadedSubmissionId, submissionId]);
+
+  const loading = Boolean(submissionId) && loadedSubmissionId !== submissionId;
 
   if (!submissionId) {
     return <p className="text-slate-500">Enter a submission ID to view scores.</p>;

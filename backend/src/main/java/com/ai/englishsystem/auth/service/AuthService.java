@@ -73,9 +73,7 @@ public class AuthService {
             throw new BadRequestException("Username already taken");
         }
 
-        Role role = roleRepository.findById(request.getRoleId() != null ? request.getRoleId() : 2)
-                .orElse(roleRepository.findByName("STUDENT")
-                        .orElseThrow(() -> new BadRequestException("Default role not found")));
+        Role role = resolveStudentRegistrationRole(request.getRoleId());
 
         User user = User.builder()
                 .username(request.getUsername())
@@ -88,13 +86,11 @@ public class AuthService {
 
         user = userRepository.save(user);
 
-        if ("STUDENT".equals(role.getName())) {
-            String studentCode = "STU-" + user.getId() + "-" + System.currentTimeMillis();
-            studentRepository.save(Student.builder()
-                    .user(user)
-                    .studentCode(studentCode)
-                    .build());
-        }
+        String studentCode = "STU-" + user.getId() + "-" + System.currentTimeMillis();
+        studentRepository.save(Student.builder()
+                .user(user)
+                .studentCode(studentCode)
+                .build());
 
         String token = jwtService.generateToken(user);
 
@@ -106,5 +102,20 @@ public class AuthService {
                 .email(user.getEmail())
                 .role(user.getRole().getName())
                 .build();
+    }
+
+    private Role resolveStudentRegistrationRole(Integer requestedRoleId) {
+        Role studentRole = roleRepository.findByName("STUDENT")
+                .orElseThrow(() -> new BadRequestException("Student role not found"));
+
+        if (requestedRoleId == null) {
+            return studentRole;
+        }
+
+        if (!studentRole.getId().equals(requestedRoleId)) {
+            throw new BadRequestException("Public registration can only create student accounts");
+        }
+
+        return studentRole;
     }
 }

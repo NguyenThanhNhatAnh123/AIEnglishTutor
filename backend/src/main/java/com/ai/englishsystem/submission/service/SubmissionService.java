@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.net.MalformedURLException;
+import java.time.ZoneId;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -117,6 +118,56 @@ public class SubmissionService {
         return submissionRepository.findByStudentOrderByStartTimeDesc(student).stream()
                 .map(s -> toListResponse(s, fetchTotalScore(s)))
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Teacher/Admin/Student: get a submission by id.
+     * - ADMIN: any submission
+     * - TEACHER: only submissions belonging to exams they own
+     * - STUDENT: only own submissions
+     */
+    @Transactional(readOnly = true)
+    public SubmissionResponse getById(Integer submissionId) {
+        Submission submission = submissionRepository.findWithAssociationsById(submissionId)
+                .orElseThrow(() -> new NotFoundException("Submission", submissionId));
+
+        if (SecurityUtils.hasRole("ADMIN")) {
+            // ok
+        } else if (SecurityUtils.hasRole("TEACHER")) {
+            Integer currentUserId = SecurityUtils.getCurrentUserId();
+            Integer ownerUserId = submission.getExam().getTeacher().getUser().getId();
+            if (!currentUserId.equals(ownerUserId)) {
+                throw new ForbiddenException("You do not have permission to view this submission");
+            }
+        } else if (SecurityUtils.hasRole("STUDENT")) {
+            Integer currentUserId = SecurityUtils.getCurrentUserId();
+            Student student = studentRepository.findByUser_Id(currentUserId)
+                    .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
+            if (!submission.getStudent().getId().equals(student.getId())) {
+                throw new ForbiddenException("You do not have permission to view this submission");
+            }
+        } else {
+            throw new ForbiddenException("Not allowed");
+        }
+
+        Integer dur = submission.getExam() != null ? submission.getExam().getDurationMinutes() : null;
+        int effectiveDur = dur != null ? dur : 60;
+        LocalDateTime effectiveStart = submission.getStartTime() != null ? submission.getStartTime() : LocalDateTime.now();
+        LocalDateTime deadline = effectiveStart.plusMinutes(effectiveDur);
+        long deadlineEpochMs = deadline.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+
+        return SubmissionResponse.builder()
+                .id(submission.getId())
+                .examId(submission.getExam() != null ? submission.getExam().getId() : null)
+                .studentId(submission.getStudent() != null ? submission.getStudent().getId() : null)
+                .attemptId(submission.getExamAttempt() != null ? submission.getExamAttempt().getId() : null)
+                .durationMinutes(effectiveDur)
+                .deadlineAt(deadline)
+                .deadlineEpochMs(deadlineEpochMs)
+                .startTime(submission.getStartTime())
+                .submitTime(submission.getSubmitTime())
+                .status(submission.getStatus() != null ? submission.getStatus().name() : null)
+                .build();
     }
 
     private Float fetchTotalScore(Submission s) {
