@@ -14,7 +14,6 @@ export function AuthProvider({ children }) {
   });
 
   const login = (authData) => {
-    // FIX: backend trả "accessToken", không phải "token"
     if (authData?.accessToken) {
       localStorage.setItem('token', authData.accessToken);
     }
@@ -23,6 +22,7 @@ export function AuthProvider({ children }) {
         userId: authData.userId,
         username: authData.username,
         email: authData.email,
+        fullName: authData.fullName,
         role: authData.role,
       };
       setUser(u);

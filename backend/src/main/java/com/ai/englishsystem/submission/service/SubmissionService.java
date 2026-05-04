@@ -4,6 +4,7 @@ import com.ai.englishsystem.ai.repository.AiResultRepository;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
+import com.ai.englishsystem.result.service.ScoreService;
 import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.repository.ExamRepository;
@@ -21,6 +22,7 @@ import com.ai.englishsystem.submission.dto.SubmitExamRequest;
 import com.ai.englishsystem.submission.dto.SubmitSubmissionRequest;
 import com.ai.englishsystem.submission.entity.Answer;
 import com.ai.englishsystem.submission.entity.Submission;
+import com.ai.englishsystem.submission.entity.SubmissionStatus;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
 import com.ai.englishsystem.submission.repository.SubmissionRepository;
 import lombok.RequiredArgsConstructor;
@@ -48,6 +50,7 @@ public class SubmissionService {
     private final AiResultRepository aiResultRepository;
     private final FeedbackRepository feedbackRepository;
     private final SpeakingFileStorage speakingFileStorage;
+    private final ScoreService scoreService;
 
     @Transactional
     public SubmissionResponse start(StartSubmissionRequest request) {
@@ -116,8 +119,19 @@ public class SubmissionService {
                 .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
 
         return submissionRepository.findByStudentOrderByStartTimeDesc(student).stream()
-                .map(s -> toListResponse(s, fetchTotalScore(s)))
+                .map(s -> toListResponse(s, resolveStudentVisibleTotalScore(s)))
                 .collect(Collectors.toList());
+    }
+
+    private Float resolveStudentVisibleTotalScore(Submission s) {
+        if (s.getStatus() == SubmissionStatus.IN_PROGRESS) {
+            return null;
+        }
+        try {
+            return scoreService.getBySubmissionId(s.getId()).getTotalScore();
+        } catch (NotFoundException ex) {
+            return null;
+        }
     }
 
     /**
@@ -156,9 +170,17 @@ public class SubmissionService {
         LocalDateTime deadline = effectiveStart.plusMinutes(effectiveDur);
         long deadlineEpochMs = deadline.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
 
+        var exam = submission.getExam();
+        String examTypeName = null;
+        if (exam != null && exam.getExamType() != null) {
+            examTypeName = exam.getExamType().name();
+        }
+
         return SubmissionResponse.builder()
                 .id(submission.getId())
-                .examId(submission.getExam() != null ? submission.getExam().getId() : null)
+                .examId(exam != null ? exam.getId() : null)
+                .examTitle(exam != null ? exam.getTitle() : null)
+                .examType(examTypeName)
                 .studentId(submission.getStudent() != null ? submission.getStudent().getId() : null)
                 .attemptId(submission.getExamAttempt() != null ? submission.getExamAttempt().getId() : null)
                 .durationMinutes(effectiveDur)

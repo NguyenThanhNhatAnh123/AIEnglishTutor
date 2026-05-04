@@ -40,6 +40,11 @@ public class Exam {
     @Builder.Default
     private String status = "DRAFT";
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "exam_type", nullable = false, length = 20)
+    @Builder.Default
+    private ExamType examType = ExamType.PRACTICE;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 

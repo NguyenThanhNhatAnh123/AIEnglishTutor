@@ -14,9 +14,10 @@ import com.ai.englishsystem.exam.dto.ExamSectionUpdateRequest;
 import com.ai.englishsystem.exam.dto.QuestionOptionResponse;
 import com.ai.englishsystem.exam.dto.QuestionResponse;
 import com.ai.englishsystem.exam.entity.Exam;
+import com.ai.englishsystem.exam.entity.ExamAttempt;
 import com.ai.englishsystem.exam.entity.ExamSection;
 import com.ai.englishsystem.exam.entity.ExamSectionType;
-import com.ai.englishsystem.exam.entity.ExamAttempt;
+import com.ai.englishsystem.exam.entity.ExamType;
 import com.ai.englishsystem.exam.repository.ExamRepository;
 import com.ai.englishsystem.exam.repository.ExamSectionRepository;
 import com.ai.englishsystem.exam.repository.ExamAttemptRepository;
@@ -131,6 +132,7 @@ public class ExamService {
                 .teacher(teacher)
                 .durationMinutes(request.getDurationMinutes() != null ? request.getDurationMinutes() : 60)
                 .status(request.getStatus() != null ? request.getStatus() : "DRAFT")
+                .examType(parseExamType(request.getExamType()))
                 .build();
 
         exam = examRepository.save(exam);
@@ -157,6 +159,9 @@ public class ExamService {
         if (request.getStatus() != null && !request.getStatus().isBlank()) {
             exam.setStatus(request.getStatus());
         }
+        if (request.getExamType() != null && !request.getExamType().isBlank()) {
+            exam.setExamType(parseExamType(request.getExamType()));
+        }
 
         exam = examRepository.save(exam);
         return toResponseWithSections(exam);
@@ -182,6 +187,9 @@ public class ExamService {
         }
         if (request.getStatus() != null && !request.getStatus().isBlank()) {
             exam.setStatus(request.getStatus());
+        }
+        if (request.getExamType() != null && !request.getExamType().isBlank()) {
+            exam.setExamType(parseExamType(request.getExamType()));
         }
 
         exam = examRepository.save(exam);
@@ -345,6 +353,17 @@ public class ExamService {
         }
     }
 
+    private static ExamType parseExamType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return ExamType.PRACTICE;
+        }
+        try {
+            return ExamType.fromString(raw);
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("Invalid examType. Use OFFICIAL or PRACTICE.");
+        }
+    }
+
     private void assertOwnerOrAdmin(Exam exam) {
         if (SecurityUtils.hasRole("ADMIN")) {
             return;
@@ -380,6 +399,7 @@ public class ExamService {
                 .teacherName(exam.getTeacher().getUser().getFullName())
                 .durationMinutes(exam.getDurationMinutes())
                 .status(exam.getStatus())
+                .examType(exam.getExamType() != null ? exam.getExamType().name() : ExamType.PRACTICE.name())
                 .createdAt(exam.getCreatedAt());
         if (Hibernate.isInitialized(exam.getSections())) {
             b.sectionCount(exam.getSections() != null ? exam.getSections().size() : 0);

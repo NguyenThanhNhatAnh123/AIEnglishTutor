@@ -25,4 +25,7 @@ public class ExamRequest {
     private Integer durationMinutes;
 
     private String status;
+
+    /** OFFICIAL or PRACTICE (default PRACTICE when omitted). */
+    private String examType;
 }

@@ -20,6 +20,7 @@ export function AuthProvider({ children }) {
         userId: authData.userId,
         username: authData.username,
         email: authData.email,
+        fullName: authData.fullName,
         role: authData.role,
       };
       setUser(u);

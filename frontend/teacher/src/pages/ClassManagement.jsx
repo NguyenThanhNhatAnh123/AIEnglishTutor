@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { classApi, teacherApi, studentApi } from '../services/api';
 import Layout from '../components/Layout';
 import Modal from '../components/common/Modal';
@@ -11,9 +12,9 @@ import { useToast } from '../context/ToastContext';
 
 function fmt(dateStr) {
   if (!dateStr) return '—';
-  return new Date(dateStr).toLocaleDateString('vi-VN', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-  });
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 // ─── ClassForm (Create / Edit) ───────────────────────────────────────────────
@@ -330,7 +331,10 @@ export default function ClassManagement() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">Class Management</h1>
-            <p className="text-sm text-slate-400 mt-0.5">Manage classes and student enrollment</p>
+            <p className="text-sm text-slate-400 mt-0.5">Manage classes and student enrollment.</p>
+            <Link to="/students" className="text-sm text-blue-600 font-medium hover:underline mt-1 inline-block">
+              Manage student accounts
+            </Link>
           </div>
           <Button variant="primary" onClick={() => setShowCreate(true)}>
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

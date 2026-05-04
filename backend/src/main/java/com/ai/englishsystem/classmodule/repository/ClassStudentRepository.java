@@ -25,6 +25,10 @@ public interface ClassStudentRepository extends JpaRepository<ClassStudent, Inte
     @Query("DELETE FROM ClassStudent cs WHERE cs.classEntity.id = :classId")
     void deleteByClassId(@Param("classId") Integer classId);
 
+    @Modifying
+    @Query("DELETE FROM ClassStudent cs WHERE cs.student.id = :studentId")
+    void deleteByStudentId(@Param("studentId") Integer studentId);
+
     @Query("""
         SELECT cs FROM ClassStudent cs
         JOIN FETCH cs.student s

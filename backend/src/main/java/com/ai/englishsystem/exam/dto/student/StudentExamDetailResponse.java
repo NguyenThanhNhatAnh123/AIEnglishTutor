@@ -18,6 +18,10 @@ public class StudentExamDetailResponse {
     private String description;
     private Integer durationMinutes;
     private String status;
+
+    /** OFFICIAL or PRACTICE */
+    private String examType;
+
     private LocalDateTime createdAt;
     private List<StudentExamSectionResponse> sections;
 }

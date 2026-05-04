@@ -15,4 +15,10 @@ public class SpeakingScoreRequest {
     private Integer answerId;
 
     private String audioUrl;
+
+    /** Optional teacher instruction to customize AI review criteria. */
+    private String customPrompt;
+
+    /** Optional transcript text from speech-to-text; when present, scoring will prioritize this text. */
+    private String transcriptText;
 }

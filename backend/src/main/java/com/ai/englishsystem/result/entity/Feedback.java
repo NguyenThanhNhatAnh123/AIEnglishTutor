@@ -26,14 +26,54 @@ public class Feedback {
     @Column(name = "teacher_feedback", columnDefinition = "TEXT")
     private String teacherFeedback;
 
+    /**
+     * Draft feedback content (AI-generated or teacher-edited) before publish.
+     * Kept in legacy ai_feedback column for backward compatibility.
+     */
     @Column(name = "ai_feedback", columnDefinition = "TEXT")
     private String aiFeedback;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "review_status", length = 20, nullable = false)
+    @Builder.Default
+    private WritingReviewStatus reviewStatus = WritingReviewStatus.DRAFT;
+
+    @Column(name = "draft_score")
+    private Float draftScore;
+
+    @Column(name = "published_score")
+    private Float publishedScore;
+
+    @Column(name = "custom_prompt", columnDefinition = "TEXT")
+    private String customPrompt;
+
+    @Column(name = "published_at")
+    private LocalDateTime publishedAt;
+
+    @Column(name = "published_by")
+    private Integer publishedBy;
+
+    @Column(name = "draft_transcript", columnDefinition = "TEXT")
+    private String draftTranscript;
+
+    @Column(name = "published_transcript", columnDefinition = "TEXT")
+    private String publishedTranscript;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
 
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
     @PrePersist
     protected void onCreate() {
-        this.createdAt = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now();
+        this.createdAt = now;
+        this.updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
     }
 }

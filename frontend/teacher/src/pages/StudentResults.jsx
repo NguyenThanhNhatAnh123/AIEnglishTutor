@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react';
-import { examApi, submissionApi, scoreApi, aiApi, API_ORIGIN } from '../services/api';
+import { examApi, submissionApi, scoreApi, writingReviewApi, speakingReviewApi, API_ORIGIN } from '../services/api';
 import Layout from '../components/Layout';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
@@ -79,8 +79,21 @@ function ScoreDetailModal({ submission, onClose }) {
   const [score, setScore] = useState(null);
   const [answers, setAnswers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [scoringAnswerId, setScoringAnswerId] = useState(null);
-  const [reviewingAnswerId, setReviewingAnswerId] = useState(null);
+  const [generatingAnswerId, setGeneratingAnswerId] = useState(null);
+  const [generatingAllReviews, setGeneratingAllReviews] = useState(false);
+  const [savingAnswerId, setSavingAnswerId] = useState(null);
+  const [publishingAnswerId, setPublishingAnswerId] = useState(null);
+  const [editingAnswerId, setEditingAnswerId] = useState(null);
+  const [customPromptByAnswer, setCustomPromptByAnswer] = useState({});
+  const [draftByAnswer, setDraftByAnswer] = useState({});
+  const [speakingGeneratingAnswerId, setSpeakingGeneratingAnswerId] = useState(null);
+  const [speakingSavingAnswerId, setSpeakingSavingAnswerId] = useState(null);
+  const [speakingPublishingAnswerId, setSpeakingPublishingAnswerId] = useState(null);
+  const [speakingRevertingAnswerId, setSpeakingRevertingAnswerId] = useState(null);
+  const [writingRevertingAnswerId, setWritingRevertingAnswerId] = useState(null);
+  const [speakingEditingAnswerId, setSpeakingEditingAnswerId] = useState(null);
+  const [speakingCustomPromptByAnswer, setSpeakingCustomPromptByAnswer] = useState({});
+  const [speakingDraftByAnswer, setSpeakingDraftByAnswer] = useState({});
   const toast = useToast();
 
   useEffect(() => {
@@ -107,66 +120,218 @@ function ScoreDetailModal({ submission, onClose }) {
     return () => { cancelled = true; };
   }, [submission.id]);
 
-  const runQuickSpeakingScore = async (answer) => {
-    if (!answer?.id || !answer?.speakingAudioUrl) {
-      toast.error('Missing speaking answer/audio URL.');
-      return;
-    }
+  const mergeWritingReview = (answerId, review) => {
+    setAnswers((prev) => prev.map((a) => (a.id !== answerId ? a : ({
+      ...a,
+      writingReviewStatus: review?.status ?? a.writingReviewStatus,
+      writingDraftScore: review?.draftScore ?? a.writingDraftScore,
+      writingDraftFeedback: review?.draftFeedback ?? a.writingDraftFeedback,
+      writingPublishedScore: review?.publishedScore ?? a.writingPublishedScore,
+      writingPublishedFeedback: review?.publishedFeedback ?? a.writingPublishedFeedback,
+      writingPublishedAt: review?.publishedAt ?? a.writingPublishedAt,
+    }))));
+  };
+
+  const mergeSpeakingReview = (answerId, review) => {
+    setAnswers((prev) => prev.map((a) => (a.id !== answerId ? a : ({
+      ...a,
+      speakingReviewStatus: review?.status ?? a.speakingReviewStatus,
+      speakingDraftScore: review?.draftScore ?? a.speakingDraftScore,
+      speakingDraftFeedback: review?.draftFeedback ?? a.speakingDraftFeedback,
+      speakingDraftTranscript: review?.draftTranscript ?? a.speakingDraftTranscript,
+      speakingPublishedScore: review?.publishedScore ?? a.speakingPublishedScore,
+      speakingPublishedFeedback: review?.publishedFeedback ?? a.speakingPublishedFeedback,
+      speakingPublishedTranscript: review?.publishedTranscript ?? a.speakingPublishedTranscript,
+      speakingPublishedAt: review?.publishedAt ?? a.speakingPublishedAt,
+    }))));
+  };
+
+  const refreshScore = async () => {
     try {
-      setScoringAnswerId(answer.id);
-      const res = await aiApi.scoreSpeaking(answer.id, answer.speakingAudioUrl);
-      const ai = res.data?.data;
-      toast.success(
-        ai?.overallScore != null
-          ? `AI scored speaking: ${Number(ai.overallScore).toFixed(1)}/10`
-          : 'AI speaking score completed.'
-      );
-      try {
-        const latestScore = await scoreApi.getBySubmissionId(submission.id);
-        setScore(latestScore.data?.data ?? score);
-      } catch {
-        // no-op: keep current score block
-      }
-    } catch (err) {
-      toast.error(err?.response?.data?.message || 'Quick speaking score failed.');
-    } finally {
-      setScoringAnswerId(null);
+      const latestScore = await scoreApi.getBySubmissionId(submission.id);
+      setScore(latestScore.data?.data ?? score);
+    } catch {
+      // no-op
     }
   };
 
-  const runQuickWritingReview = async (answer) => {
-    if (!answer?.id || !answer?.answerText) {
-      toast.error('Missing writing answer text.');
-      return;
-    }
+  const generateDraftReview = async (answer) => {
+    if (!answer?.id) return;
     try {
-      setReviewingAnswerId(answer.id);
-      const res = await aiApi.scoreWriting(answer.id, answer.answerText);
-      const ai = res.data?.data;
-      toast.success(
-        ai?.overallScore != null
-          ? `AI reviewed writing: ${Number(ai.overallScore).toFixed(1)}/10`
-          : 'AI writing review completed.'
-      );
-      try {
-        const latestScore = await scoreApi.getBySubmissionId(submission.id);
-        setScore(latestScore.data?.data ?? score);
-      } catch {
-        // no-op: keep current score block
-      }
+      setGeneratingAnswerId(answer.id);
+      const customPrompt = customPromptByAnswer[answer.id] || undefined;
+      const res = await writingReviewApi.generateDraft(answer.id, customPrompt);
+      mergeWritingReview(answer.id, res.data?.data);
+      toast.success('Draft AI review generated.');
+      await refreshScore();
     } catch (err) {
-      toast.error(err?.response?.data?.message || 'Quick writing review failed.');
+      toast.error(err?.response?.data?.message || 'Generate AI review failed.');
     } finally {
-      setReviewingAnswerId(null);
+      setGeneratingAnswerId(null);
+    }
+  };
+
+  const generateAllDraftReviews = async () => {
+    const writing = writingAnswers(answers);
+    const speaking = speakingAnswers(answers);
+    if (writing.length === 0 && speaking.length === 0) return;
+
+    try {
+      setGeneratingAllReviews(true);
+      // Keep it sequential to avoid API rate limit spikes.
+      for (const a of writing) {
+        const customPrompt = customPromptByAnswer[a.id] || undefined;
+        const res = await writingReviewApi.generateDraft(a.id, customPrompt);
+        mergeWritingReview(a.id, res.data?.data);
+      }
+      for (const a of speaking) {
+        const customPrompt = speakingCustomPromptByAnswer[a.id] || undefined;
+        const res = await speakingReviewApi.generateDraft(a.id, customPrompt, 'en');
+        mergeSpeakingReview(a.id, res.data?.data);
+      }
+      toast.success('Draft AI reviews generated (Writing + Speaking).');
+      await refreshScore();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Generate AI reviews failed.');
+    } finally {
+      setGeneratingAllReviews(false);
+    }
+  };
+
+  const saveManualDraft = async (answer) => {
+    if (!answer?.id) return;
+    const draft = draftByAnswer[answer.id] || {};
+    const parsedScore = draft.score === '' || draft.score == null ? null : Number(draft.score);
+    try {
+      setSavingAnswerId(answer.id);
+      const res = await writingReviewApi.updateDraft(answer.id, {
+        score: Number.isNaN(parsedScore) ? null : parsedScore,
+        feedback: draft.feedback ?? null,
+      });
+      mergeWritingReview(answer.id, res.data?.data);
+      setEditingAnswerId(null);
+      toast.success('Draft review updated.');
+      await refreshScore();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Update review failed.');
+    } finally {
+      setSavingAnswerId(null);
+    }
+  };
+
+  const publishReview = async (answer) => {
+    if (!answer?.id) return;
+    try {
+      setPublishingAnswerId(answer.id);
+      const res = await writingReviewApi.approvePublish(answer.id);
+      mergeWritingReview(answer.id, res.data?.data);
+      toast.success('Writing review published.');
+      await refreshScore();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Publish review failed.');
+    } finally {
+      setPublishingAnswerId(null);
+    }
+  };
+
+  const generateSpeakingDraftReview = async (answer) => {
+    if (!answer?.id) return;
+    try {
+      setSpeakingGeneratingAnswerId(answer.id);
+      const customPrompt = speakingCustomPromptByAnswer[answer.id] || undefined;
+      const res = await speakingReviewApi.generateDraft(answer.id, customPrompt, 'en');
+      mergeSpeakingReview(answer.id, res.data?.data);
+      toast.success('Draft AI speaking review generated.');
+      await refreshScore();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Generate AI speaking review failed.');
+    } finally {
+      setSpeakingGeneratingAnswerId(null);
+    }
+  };
+
+  const saveManualSpeakingDraft = async (answer) => {
+    if (!answer?.id) return;
+    const draft = speakingDraftByAnswer[answer.id] || {};
+    const parsedScore = draft.score === '' || draft.score == null ? null : Number(draft.score);
+    try {
+      setSpeakingSavingAnswerId(answer.id);
+      const res = await speakingReviewApi.updateDraft(answer.id, {
+        score: Number.isNaN(parsedScore) ? null : parsedScore,
+        feedback: draft.feedback ?? null,
+        transcript: draft.transcript ?? null,
+      });
+      mergeSpeakingReview(answer.id, res.data?.data);
+      setSpeakingEditingAnswerId(null);
+      toast.success('Draft speaking review updated.');
+      await refreshScore();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Update speaking review failed.');
+    } finally {
+      setSpeakingSavingAnswerId(null);
+    }
+  };
+
+  const publishSpeakingReview = async (answer) => {
+    if (!answer?.id) return;
+    try {
+      setSpeakingPublishingAnswerId(answer.id);
+      const res = await speakingReviewApi.approvePublish(answer.id);
+      mergeSpeakingReview(answer.id, res.data?.data);
+      toast.success('Speaking review published.');
+      await refreshScore();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Publish speaking review failed.');
+    } finally {
+      setSpeakingPublishingAnswerId(null);
+    }
+  };
+
+  const revertSpeakingReview = async (answer) => {
+    if (!answer?.id) return;
+    if (!window.confirm('Move this speaking review back to draft? Students will no longer see the published score.')) return;
+    try {
+      setSpeakingRevertingAnswerId(answer.id);
+      const res = await speakingReviewApi.revertDraft(answer.id);
+      mergeSpeakingReview(answer.id, res.data?.data);
+      toast.success('Speaking review set to draft.');
+      await refreshScore();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Revert speaking review failed.');
+    } finally {
+      setSpeakingRevertingAnswerId(null);
+    }
+  };
+
+  const revertWritingReview = async (answer) => {
+    if (!answer?.id) return;
+    if (!window.confirm('Move this writing review back to draft? Students will no longer see the published score.')) return;
+    try {
+      setWritingRevertingAnswerId(answer.id);
+      const res = await writingReviewApi.revertDraft(answer.id);
+      mergeWritingReview(answer.id, res.data?.data);
+      toast.success('Writing review set to draft.');
+      await refreshScore();
+    } catch (err) {
+      toast.error(err?.response?.data?.message || 'Revert writing review failed.');
+    } finally {
+      setWritingRevertingAnswerId(null);
     }
   };
 
   return (
-    <Modal isOpen onClose={onClose} title={`Score - ${submission.studentName || `Student #${submission.studentId}`}`} maxWidth="max-w-lg">
+    <Modal isOpen onClose={onClose} title={`Score — ${submission.studentName || `Student #${submission.studentId}`}`} maxWidth="max-w-5xl">
       {loading ? <PageLoader /> : !score ? (
         <p className="text-slate-400 text-sm">Score not yet available for this submission.</p>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-4 max-h-[82vh] overflow-y-auto pr-1">
+          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-xs text-slate-600 space-y-1">
+            <p><span className="font-semibold text-slate-700">Started:</span> {submission.startTime ? new Date(submission.startTime).toLocaleString() : '—'}</p>
+            <p><span className="font-semibold text-slate-700">Ended:</span> {submission.endTime ? new Date(submission.endTime).toLocaleString() : (submission.submitTime ? new Date(submission.submitTime).toLocaleString() : '—')}</p>
+            <p><span className="font-semibold text-slate-700">Time spent:</span> {formatDurationSeconds(submission.durationSeconds)}</p>
+            <p><span className="font-semibold text-slate-700">Completion:</span> {formatCompletion(submission)}</p>
+            <p><span className="font-semibold text-slate-700">Suspicious summary:</span> {formatSuspicious(submission)}</p>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             {[
               { label: 'Total Score', value: score.totalScore, color: 'text-blue-700' },
@@ -180,22 +345,27 @@ function ScoreDetailModal({ submission, onClose }) {
               </div>
             ))}
           </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              className="text-xs text-blue-700 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={generatingAllReviews || (writingAnswers(answers).length === 0 && speakingAnswers(answers).length === 0)}
+              onClick={generateAllDraftReviews}
+            >
+              {generatingAllReviews ? 'Generating...' : 'Generate AI Reviews (Writing+Speaking)'}
+            </button>
+          </div>
           {speakingAnswers(answers).length > 0 && (
             <div className="rounded-xl border border-slate-100 p-4 space-y-3">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Speaking</p>
               {speakingAnswers(answers).map((a) => (
-                <div key={a.id} className="space-y-1">
-                  <p className="text-xs text-slate-400">Question #{a.questionId}</p>
-                  <AudioPlayer src={resolveMediaSrc(a.speakingAudioUrl)} disabled={false} />
+                <div key={a.id} className="grid gap-4 md:grid-cols-2 border-b border-slate-100 pb-4 last:border-0">
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Question</p>
+                    <p className="text-xs text-slate-500">Type: SPEAKING · ID #{a.questionId}</p>
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{a.questionText || '—'}</p>
+                    <AudioPlayer src={resolveMediaSrc(a.speakingAudioUrl)} disabled={false} />
                   <SpeakingWaveform src={resolveMediaSrc(a.speakingAudioUrl)} />
-                  <button
-                    type="button"
-                    className="text-xs text-emerald-700 hover:underline"
-                    disabled={scoringAnswerId === a.id}
-                    onClick={() => runQuickSpeakingScore(a)}
-                  >
-                    {scoringAnswerId === a.id ? 'Scoring...' : 'Quick AI score'}
-                  </button>
                   <button
                     type="button"
                     className="text-xs text-blue-600 hover:underline"
@@ -203,9 +373,154 @@ function ScoreDetailModal({ submission, onClose }) {
                   >
                     Download MP3
                   </button>
+                  <div className="text-xs">
+                    <span className="font-semibold text-slate-500 mr-2">Status:</span>
+                    <span className={a.speakingReviewStatus === 'PUBLISHED' ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-semibold'}>
+                      {a.speakingReviewStatus === 'PUBLISHED' ? 'Published' : 'Draft / Pending Publish'}
+                    </span>
+                  </div>
+                  {a.speakingDraftTranscript && (
+                    <div className="bg-sky-50 rounded-lg p-2">
+                      <p className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold">Draft Transcript</p>
+                      <p className="text-xs text-slate-700 whitespace-pre-line">{a.speakingDraftTranscript}</p>
+                    </div>
+                  )}
+                  {a.speakingDraftFeedback && (
+                    <div className="bg-emerald-50 rounded-lg p-2">
+                      <p className="text-[11px] uppercase tracking-wide text-emerald-700 font-semibold">Draft Review</p>
+                      {a.speakingDraftScore != null && <p className="text-xs text-emerald-800">Score: {a.speakingDraftScore}</p>}
+                      <p className="text-xs text-slate-700">{a.speakingDraftFeedback}</p>
+                    </div>
+                  )}
+                  {a.speakingReviewStatus === 'PUBLISHED' && a.speakingPublishedTranscript && (
+                    <div className="bg-indigo-50 rounded-lg p-2">
+                      <p className="text-[11px] uppercase tracking-wide text-indigo-700 font-semibold">Published Transcript</p>
+                      <p className="text-xs text-slate-700 whitespace-pre-line">{a.speakingPublishedTranscript}</p>
+                    </div>
+                  )}
+                  {a.speakingReviewStatus === 'PUBLISHED' && a.speakingPublishedFeedback && (
+                    <div className="bg-violet-50 rounded-lg p-2">
+                      <p className="text-[11px] uppercase tracking-wide text-violet-700 font-semibold">Published Review</p>
+                      {a.speakingPublishedScore != null && <p className="text-xs text-violet-800">Score: {a.speakingPublishedScore}</p>}
+                      <p className="text-xs text-slate-700">{a.speakingPublishedFeedback}</p>
+                    </div>
+                  )}
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Review & publish</p>
+                    <input
+                      type="text"
+                      placeholder="Optional speaking custom prompt..."
+                      value={speakingCustomPromptByAnswer[a.id] ?? ''}
+                      onChange={(e) => setSpeakingCustomPromptByAnswer((prev) => ({ ...prev, [a.id]: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="text-xs text-emerald-700 hover:underline"
+                        disabled={speakingGeneratingAnswerId === a.id}
+                        onClick={() => generateSpeakingDraftReview(a)}
+                      >
+                        {speakingGeneratingAnswerId === a.id ? 'Generating...' : 'Generate AI Review'}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-blue-700 hover:underline"
+                        onClick={() => {
+                          setSpeakingEditingAnswerId((prev) => (prev === a.id ? null : a.id));
+                          setSpeakingDraftByAnswer((prev) => ({
+                            ...prev,
+                            [a.id]: {
+                              score: a.speakingDraftScore ?? '',
+                              feedback: a.speakingDraftFeedback ?? '',
+                              transcript: a.speakingDraftTranscript ?? '',
+                            },
+                          }));
+                        }}
+                      >
+                        Edit Review
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-purple-700 hover:underline"
+                        disabled={speakingPublishingAnswerId === a.id}
+                        onClick={() => publishSpeakingReview(a)}
+                      >
+                        {speakingPublishingAnswerId === a.id ? 'Publishing...' : 'Approve & Publish'}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-amber-700 hover:underline"
+                        disabled={speakingRevertingAnswerId === a.id || a.speakingReviewStatus !== 'PUBLISHED'}
+                        onClick={() => revertSpeakingReview(a)}
+                      >
+                        {speakingRevertingAnswerId === a.id ? 'Reverting...' : 'Move to draft'}
+                      </button>
+                    </div>
+                  {speakingEditingAnswerId === a.id && (
+                    <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                      <label className="text-xs text-slate-500 block">
+                        Draft score (0-100)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={speakingDraftByAnswer[a.id]?.score ?? ''}
+                          onChange={(e) => setSpeakingDraftByAnswer((prev) => ({
+                            ...prev,
+                            [a.id]: {
+                              ...prev[a.id],
+                              score: e.target.value,
+                            },
+                          }))}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 block">
+                        Draft transcript
+                        <textarea
+                          rows={3}
+                          value={speakingDraftByAnswer[a.id]?.transcript ?? ''}
+                          onChange={(e) => setSpeakingDraftByAnswer((prev) => ({
+                            ...prev,
+                            [a.id]: {
+                              ...prev[a.id],
+                              transcript: e.target.value,
+                            },
+                          }))}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 block">
+                        Draft feedback
+                        <textarea
+                          rows={3}
+                          value={speakingDraftByAnswer[a.id]?.feedback ?? ''}
+                          onChange={(e) => setSpeakingDraftByAnswer((prev) => ({
+                            ...prev,
+                            [a.id]: {
+                              ...prev[a.id],
+                              feedback: e.target.value,
+                            },
+                          }))}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs text-blue-700 hover:underline"
+                        disabled={speakingSavingAnswerId === a.id}
+                        onClick={() => saveManualSpeakingDraft(a)}
+                      >
+                        {speakingSavingAnswerId === a.id ? 'Saving...' : 'Save Draft Review'}
+                      </button>
+                    </div>
+                  )}
                   {a.speakingDurationSeconds != null && (
                     <p className="text-xs text-slate-400">{a.speakingDurationSeconds}s / {a.speakingFormat || 'mp3'}</p>
                   )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -214,17 +529,130 @@ function ScoreDetailModal({ submission, onClose }) {
             <div className="rounded-xl border border-slate-100 p-4 space-y-3">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Writing</p>
               {writingAnswers(answers).map((a) => (
-                <div key={a.id} className="space-y-2">
-                  <p className="text-xs text-slate-400">Question #{a.questionId}</p>
-                  <p className="text-xs text-slate-600 line-clamp-3">{a.answerText}</p>
-                  <button
-                    type="button"
-                    className="text-xs text-purple-700 hover:underline"
-                    disabled={reviewingAnswerId === a.id}
-                    onClick={() => runQuickWritingReview(a)}
-                  >
-                    {reviewingAnswerId === a.id ? 'Reviewing...' : 'Quick AI review'}
-                  </button>
+                <div key={a.id} className="grid gap-4 md:grid-cols-2 border-b border-slate-100 pb-4 last:border-0">
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Question</p>
+                    <p className="text-xs text-slate-500">Type: WRITING · ID #{a.questionId}</p>
+                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{a.questionText || '—'}</p>
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Student answer</p>
+                    <p className="text-xs text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto border border-slate-100 rounded-lg p-2 bg-white">{a.answerText}</p>
+                  <div className="text-xs">
+                    <span className="font-semibold text-slate-500 mr-2">Status:</span>
+                    <span className={a.writingReviewStatus === 'PUBLISHED' ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-semibold'}>
+                      {a.writingReviewStatus === 'PUBLISHED' ? 'Published' : 'Draft / Pending Publish'}
+                    </span>
+                  </div>
+                  {a.writingDraftFeedback && (
+                    <div className="bg-violet-50 rounded-lg p-2">
+                      <p className="text-[11px] uppercase tracking-wide text-violet-700 font-semibold">Draft Review</p>
+                      {a.writingDraftScore != null && <p className="text-xs text-violet-800">Score: {a.writingDraftScore}</p>}
+                      <p className="text-xs text-slate-700">{a.writingDraftFeedback}</p>
+                    </div>
+                  )}
+                  {a.writingReviewStatus === 'PUBLISHED' && a.writingPublishedFeedback && (
+                    <div className="bg-emerald-50 rounded-lg p-2">
+                      <p className="text-[11px] uppercase tracking-wide text-emerald-700 font-semibold">Published Review</p>
+                      {a.writingPublishedScore != null && <p className="text-xs text-emerald-800">Score: {a.writingPublishedScore}</p>}
+                      <p className="text-xs text-slate-700">{a.writingPublishedFeedback}</p>
+                    </div>
+                  )}
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Review & publish</p>
+                    <input
+                      type="text"
+                      placeholder="Optional custom prompt..."
+                      value={customPromptByAnswer[a.id] ?? ''}
+                      onChange={(e) => setCustomPromptByAnswer((prev) => ({ ...prev, [a.id]: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="text-xs text-purple-700 hover:underline"
+                        disabled={generatingAnswerId === a.id}
+                        onClick={() => generateDraftReview(a)}
+                      >
+                        {generatingAnswerId === a.id ? 'Generating...' : 'Generate AI Review'}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-blue-700 hover:underline"
+                        onClick={() => {
+                          setEditingAnswerId((prev) => (prev === a.id ? null : a.id));
+                          setDraftByAnswer((prev) => ({
+                            ...prev,
+                            [a.id]: {
+                              score: a.writingDraftScore ?? '',
+                              feedback: a.writingDraftFeedback ?? '',
+                            },
+                          }));
+                        }}
+                      >
+                        Edit Review
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-emerald-700 hover:underline"
+                        disabled={publishingAnswerId === a.id}
+                        onClick={() => publishReview(a)}
+                      >
+                        {publishingAnswerId === a.id ? 'Publishing...' : 'Approve & Publish'}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-amber-700 hover:underline"
+                        disabled={writingRevertingAnswerId === a.id || a.writingReviewStatus !== 'PUBLISHED'}
+                        onClick={() => revertWritingReview(a)}
+                      >
+                        {writingRevertingAnswerId === a.id ? 'Reverting...' : 'Move to draft'}
+                      </button>
+                    </div>
+                  {editingAnswerId === a.id && (
+                    <div className="rounded-lg border border-slate-200 p-3 space-y-2">
+                      <label className="text-xs text-slate-500 block">
+                        Draft score (0-100)
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          value={draftByAnswer[a.id]?.score ?? ''}
+                          onChange={(e) => setDraftByAnswer((prev) => ({
+                            ...prev,
+                            [a.id]: {
+                              ...prev[a.id],
+                              score: e.target.value,
+                            },
+                          }))}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 block">
+                        Draft feedback
+                        <textarea
+                          rows={3}
+                          value={draftByAnswer[a.id]?.feedback ?? ''}
+                          onChange={(e) => setDraftByAnswer((prev) => ({
+                            ...prev,
+                            [a.id]: {
+                              ...prev[a.id],
+                              feedback: e.target.value,
+                            },
+                          }))}
+                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs text-blue-700 hover:underline"
+                        disabled={savingAnswerId === a.id}
+                        onClick={() => saveManualDraft(a)}
+                      >
+                        {savingAnswerId === a.id ? 'Saving...' : 'Save Draft Review'}
+                      </button>
+                    </div>
+                  )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -235,11 +663,6 @@ function ScoreDetailModal({ submission, onClose }) {
               <p className="text-sm text-slate-700">{score.feedback}</p>
             </div>
           )}
-          <div className="text-xs text-slate-400 space-y-1">
-            <p>Started: {submission.startTime ? new Date(submission.startTime).toLocaleString() : '-'}</p>
-            <p>Ended: {submission.endTime ? new Date(submission.endTime).toLocaleString() : (submission.submitTime ? new Date(submission.submitTime).toLocaleString() : '-')}</p>
-            <p>Time spent: {formatDurationSeconds(submission.durationSeconds)}</p>
-          </div>
         </div>
       )}
     </Modal>

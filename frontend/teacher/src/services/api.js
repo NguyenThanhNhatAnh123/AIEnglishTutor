@@ -47,6 +47,10 @@ export const authApi = {
   login: (data) => api.post('/auth/login', data),
 };
 
+export const roleApi = {
+  getAll: () => api.get('/roles'),
+};
+
 export const userApi = {
   getAll: () => api.get('/users'),
   getById: (id) => api.get(`/users/${id}`),
@@ -57,7 +61,10 @@ export const userApi = {
 
 export const studentApi = {
   getAll: () => api.get('/students'),
+  getById: (id) => api.get(`/students/${id}`),
   create: (data) => api.post('/students', data),
+  update: (id, data) => api.put(`/students/${id}`, data),
+  delete: (id) => api.delete(`/students/${id}`),
 };
 
 export const teacherApi = {
@@ -123,12 +130,35 @@ export const aiApi = {
       answerId,
       audioUrl,
     }),
-  scoreWriting: (answerId, essayText) =>
+  scoreWriting: (answerId, essayText, customPrompt) =>
     api.post('/ai/score-writing', {
       answerId,
       essayText,
+      customPrompt,
     }),
   tts: (text) => api.post('/ai/tts', { text }),
+};
+
+export const writingReviewApi = {
+  generateDraft: (answerId, customPrompt) =>
+    api.post(`/writing-reviews/answers/${answerId}/generate-draft`, { customPrompt }),
+  updateDraft: (answerId, data) =>
+    api.put(`/writing-reviews/answers/${answerId}`, data),
+  approvePublish: (answerId) =>
+    api.post(`/writing-reviews/answers/${answerId}/approve-publish`),
+  revertDraft: (answerId) =>
+    api.post(`/writing-reviews/answers/${answerId}/revert-draft`),
+};
+
+export const speakingReviewApi = {
+  generateDraft: (answerId, customPrompt, language = 'en') =>
+    api.post(`/speaking-reviews/answers/${answerId}/generate-draft`, { customPrompt, language }),
+  updateDraft: (answerId, data) =>
+    api.put(`/speaking-reviews/answers/${answerId}`, data),
+  approvePublish: (answerId) =>
+    api.post(`/speaking-reviews/answers/${answerId}/approve-publish`),
+  revertDraft: (answerId) =>
+    api.post(`/speaking-reviews/answers/${answerId}/revert-draft`),
 };
 
 export const submissionApi = {

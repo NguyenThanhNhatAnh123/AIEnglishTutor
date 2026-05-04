@@ -15,4 +15,7 @@ public class WritingScoreRequest {
     private Integer answerId;
 
     private String essayText;
+
+    /** Optional teacher instruction to customize AI review criteria. */
+    private String customPrompt;
 }

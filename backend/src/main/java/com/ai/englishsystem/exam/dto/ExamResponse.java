@@ -21,6 +21,10 @@ public class ExamResponse {
     private String teacherName;
     private Integer durationMinutes;
     private String status;
+
+    /** OFFICIAL or PRACTICE */
+    private String examType;
+
     private LocalDateTime createdAt;
     /** Populated in list responses when sections are eager-fetched (e.g. teacher's exams). */
     @JsonInclude(JsonInclude.Include.NON_NULL)

@@ -58,6 +58,8 @@ export const studentExamApi = {
 export const submissionApi = {
   /** Student's own submission history */
   getMy: () => api.get('/submissions/my'),
+  /** Own submission detail (title, status, timing) — server enforces ownership */
+  getById: (submissionId) => api.get(`/submissions/${submissionId}`),
 };
 
 export const scoreApi = {
@@ -68,10 +70,8 @@ export const scoreApi = {
 export const mediaApi = {
   upload: (file) => {
     const formData = new FormData();
-    // ✅ Dùng fallback chắc chắn cho filename
     formData.append('file', file, 'recording.webm');
     return api.post('/media/upload', formData);
-    // ✅ Bỏ header Content-Type - để axios/browser tự set kèm boundary
   },
 };
 

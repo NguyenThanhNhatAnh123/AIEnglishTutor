@@ -3,7 +3,9 @@ package com.ai.englishsystem.user.service;
 import com.ai.englishsystem.auth.entity.Role;
 import com.ai.englishsystem.auth.repository.RoleRepository;
 import com.ai.englishsystem.common.exception.BadRequestException;
+import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
+import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.user.dto.UserRequest;
 import com.ai.englishsystem.user.dto.UserResponse;
 import com.ai.englishsystem.user.entity.User;
@@ -49,6 +51,12 @@ public class UserService {
 
         Role role = roleRepository.findById(request.getRoleId())
                 .orElseThrow(() -> new NotFoundException("Role", request.getRoleId()));
+
+        if (SecurityUtils.hasRole("TEACHER") && !SecurityUtils.hasRole("ADMIN")) {
+            if (!"STUDENT".equalsIgnoreCase(role.getName())) {
+                throw new ForbiddenException("Teachers may only create accounts with the STUDENT role");
+            }
+        }
 
         User user = User.builder()
                 .username(request.getUsername())

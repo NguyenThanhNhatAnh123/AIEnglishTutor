@@ -4,7 +4,8 @@ import Badge from '../components/common/Badge';
 
 export default function Profile() {
   const { user } = useAuth();
-  const initials = user?.username?.slice(0, 2)?.toUpperCase() || 'TC';
+  const displayName = user?.fullName || user?.username || 'Teacher';
+  const initials = (user?.fullName?.slice(0, 2) || user?.username?.slice(0, 2) || 'TC').toUpperCase();
 
   return (
     <Layout>
@@ -15,7 +16,10 @@ export default function Profile() {
             {initials}
           </div>
           <div className="flex-1">
-            <h2 className="text-xl font-bold text-slate-800">{user?.username}</h2>
+            <h2 className="text-xl font-bold text-slate-800">{displayName}</h2>
+            {user?.fullName && user?.username && (
+              <p className="text-slate-500 text-sm">@{user.username}</p>
+            )}
             <p className="text-slate-400 text-sm">{user?.email}</p>
             <div className="flex items-center gap-2 mt-2">
               <Badge status="ACTIVE" label={user?.role || 'TEACHER'} />
@@ -27,6 +31,7 @@ export default function Profile() {
         <div className="card space-y-4">
           <h3 className="section-title">Account Information</h3>
           {[
+            { label: 'Full name', value: user?.fullName },
             { label: 'Username', value: user?.username },
             { label: 'Email', value: user?.email },
             { label: 'Role', value: user?.role },

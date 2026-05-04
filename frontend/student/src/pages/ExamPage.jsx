@@ -299,7 +299,7 @@ export default function ExamPage() {
     const now = Date.now();
     if (now - lastWarningAtRef.current > 2500) {
       lastWarningAtRef.current = now;
-      toast.warning('Hệ thống đã ghi nhận hoạt động bất thường trong lúc thi.');
+      toast.warning('Unusual activity was recorded during your exam session.');
     }
   }, [submission, toast]);
 
@@ -527,14 +527,32 @@ export default function ExamPage() {
   return (
     <div className="min-h-screen -m-6 bg-slate-50 dark:bg-slate-950 text-slate-900">
       {/* ─── Sticky header ─────────────────────────────────────────── */}
-      <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-6 py-3 flex flex-wrap items-center justify-between gap-3 shadow-sm">
-        <div>
-          <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100">{exam.title}</h1>
-          <p className="text-xs text-slate-400">
-            {answeredCount} of {allQuestions.length} answered
+      <div className="sticky top-0 z-10 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-4 sm:px-6 py-3 flex flex-col gap-3 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-base sm:text-lg font-bold text-slate-800 dark:text-slate-100 truncate">{exam.title}</h1>
+            {exam.examType && (
+              <span className={`text-[10px] uppercase tracking-wide font-bold px-2 py-0.5 rounded-md shrink-0 ${
+                exam.examType === 'OFFICIAL'
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200'
+                  : 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200'
+              }`}>
+                {exam.examType === 'OFFICIAL' ? 'Official' : 'Practice'}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Progress: {answeredCount} / {allQuestions.length} answered
           </p>
+          <div className="mt-2 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden max-w-md">
+            <div
+              className="h-full bg-blue-600 rounded-full transition-all duration-300"
+              style={{ width: `${allQuestions.length ? (answeredCount / allQuestions.length) * 100 : 0}%` }}
+            />
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 shrink-0">
           <button
             type="button"
             onClick={() => setDark((d) => !d)}
@@ -563,6 +581,7 @@ export default function ExamPage() {
             </Button>
           )}
         </div>
+        </div>
       </div>
 
       {/* ─── Pre-start screen ──────────────────────────────────────── */}
@@ -578,7 +597,13 @@ export default function ExamPage() {
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 text-center mb-2">{exam.title}</h2>
             <p className="text-slate-500 dark:text-slate-300 text-sm text-center mb-6">{exam.description || 'No description.'}</p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Exam type</p>
+                <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">
+                  {exam.examType === 'OFFICIAL' ? 'Official' : 'Practice'}
+                </p>
+              </div>
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Duration</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{exam.durationMinutes} min</p>
@@ -587,11 +612,20 @@ export default function ExamPage() {
                 <p className="text-xs uppercase tracking-wide text-slate-500">Questions</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{allQuestions.length}</p>
               </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center col-span-2 sm:col-span-1">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Sections</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{exam.sections?.length || 0}</p>
               </div>
             </div>
+            {exam.examType === 'OFFICIAL' && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/90 dark:bg-amber-950/30 dark:border-amber-800 p-4 text-sm text-amber-950 dark:text-amber-100 mb-6">
+                <p className="font-semibold mb-1">Official exam</p>
+                <p className="text-xs leading-relaxed opacity-90">
+                  You can complete this exam only once. If you already submitted it, you cannot start again.
+                  If you disconnected, resume your in-progress session from the submissions list.
+                </p>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
@@ -610,11 +644,11 @@ export default function ExamPage() {
               </div>
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
                 <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Before you start</p>
-                <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300">
-                  <li>• Keep a stable internet connection.</li>
-                  <li>• Use headphones for listening/speaking parts.</li>
-                  <li>• Allow microphone permission for speaking answers (saved as MP3).</li>
-                  <li>• Need at least 50% answered to submit.</li>
+                <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300 list-disc pl-4">
+                  <li>Keep a stable internet connection.</li>
+                  <li>Use headphones for listening and speaking sections.</li>
+                  <li>Allow microphone access for speaking answers (stored as MP3).</li>
+                  <li>You must answer at least 50% of questions before you can submit.</li>
                 </ul>
               </div>
             </div>

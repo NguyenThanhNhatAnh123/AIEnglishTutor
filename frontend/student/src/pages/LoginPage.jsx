@@ -27,7 +27,7 @@ export default function LoginPage() {
 
       const role = (data.role || '').toUpperCase();
 
-      // FIX: Student portal chỉ cho STUDENT vào
+      // Student portal accepts STUDENT accounts only
       if (role !== 'STUDENT') {
         toast.error('Please use the Teacher Portal to log in.');
         return;
@@ -38,7 +38,6 @@ export default function LoginPage() {
     } catch (err) {
       toast.error(err.response?.data?.message || 'Login failed. Please try again.');
     } finally {
-      // finally luôn chạy dù có return trong try — đảm bảo loading reset
       setLoading(false);
     }
   };

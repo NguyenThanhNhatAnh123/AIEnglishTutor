@@ -113,8 +113,12 @@ export default function SubmissionHistory() {
                     <td className="px-4 py-3 text-center">
                       {s.totalScore != null ? (
                         <span className="font-bold text-blue-700">{Math.round(s.totalScore * 10) / 10}</span>
+                      ) : (s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED') ? (
+                        <span className="text-slate-500 text-xs font-semibold tabular-nums" title="Score is hidden until your teacher publishes the review">
+                          N/A
+                        </span>
                       ) : (
-                        <span className="text-slate-300 text-xs">Pending</span>
+                        <span className="text-slate-400 text-xs">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-center">

@@ -1,8 +1,5 @@
 package com.ai.englishsystem.exam.service;
 
-import com.ai.englishsystem.ai.dto.SpeakingScoreRequest;
-import com.ai.englishsystem.ai.dto.WritingScoreRequest;
-import com.ai.englishsystem.ai.service.AiScoringService;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
@@ -12,6 +9,7 @@ import com.ai.englishsystem.exam.dto.student.*;
 import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.entity.ExamAttempt;
 import com.ai.englishsystem.exam.entity.ExamSection;
+import com.ai.englishsystem.exam.entity.ExamType;
 import com.ai.englishsystem.exam.entity.Question;
 import com.ai.englishsystem.exam.repository.ExamAttemptRepository;
 import com.ai.englishsystem.exam.repository.ExamRepository;
@@ -39,6 +37,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -55,7 +54,6 @@ public class StudentExamService {
     private final AnswerRepository answerRepository;
     private final StudentRepository studentRepository;
     private final ScoreRepository scoreRepository;
-    private final AiScoringService aiScoringService;
     private final SubmissionSuspiciousEventRepository submissionSuspiciousEventRepository;
 
     /**
@@ -72,6 +70,7 @@ public class StudentExamService {
                         .teacherName(exam.getTeacher().getUser().getFullName())
                         .durationMinutes(exam.getDurationMinutes())
                         .status(exam.getStatus())
+                        .examType(exam.getExamType() != null ? exam.getExamType().name() : ExamType.PRACTICE.name())
                         .createdAt(exam.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
@@ -89,6 +88,19 @@ public class StudentExamService {
         if (existing.isPresent()) {
             log.debug("Resuming in-progress submission {} for student {}", existing.get().getId(), student.getId());
             return toStartResponse(existing.get());
+        }
+
+        if (exam.getExamType() == ExamType.OFFICIAL) {
+            boolean alreadyCompleted = submissionRepository.existsByExam_IdAndStudent_IdAndStatusIn(
+                    exam.getId(),
+                    student.getId(),
+                    EnumSet.of(SubmissionStatus.SUBMITTED, SubmissionStatus.AUTO_SUBMITTED)
+            );
+            if (alreadyCompleted) {
+                throw new BadRequestException(
+                        "This is an official exam. You have already completed it and cannot start again."
+                );
+            }
         }
 
         int attemptNo = examAttemptRepository.countByExam_IdAndStudent_Id(exam.getId(), student.getId()) + 1;
@@ -220,8 +232,8 @@ public class StudentExamService {
         float[] mc = scoreMcqAndListening(exam, answers);
         Float mcScore = mc[1] > 0 ? (mc[0] / mc[1]) * 100f : null;
 
-        Float writingScore = scoreWritingSection(exam, answers);
-        Float speakingScore = scoreSpeakingSection(exam, answers);
+        Float writingScore = null;
+        Float speakingScore = null;
 
         float totalScore = combineScores(mcScore, writingScore, speakingScore);
 
@@ -323,6 +335,7 @@ public class StudentExamService {
                 .description(exam.getDescription())
                 .durationMinutes(exam.getDurationMinutes())
                 .status(exam.getStatus())
+                .examType(exam.getExamType() != null ? exam.getExamType().name() : ExamType.PRACTICE.name())
                 .createdAt(exam.getCreatedAt())
                 .sections(sections)
                 .build();
@@ -497,61 +510,6 @@ public class StudentExamService {
         return new float[]{earned, max};
     }
 
-    private Float scoreWritingSection(Exam exam, List<Answer> answers) {
-        List<Float> parts = new ArrayList<>();
-        for (ExamSection sec : sectionsOf(exam)) {
-            for (Question q : questionsOf(sec)) {
-                if (!"WRITING".equals(normalizeType(q.getQuestionType()))) {
-                    continue;
-                }
-                Answer a = findAnswer(answers, q.getId());
-                if (a == null || a.getAnswerText() == null || a.getAnswerText().isBlank()) {
-                    parts.add(0f);
-                    continue;
-                }
-                try {
-                    var ai = aiScoringService.scoreWriting(WritingScoreRequest.builder()
-                            .answerId(a.getId())
-                            .essayText(a.getAnswerText())
-                            .build());
-                    parts.add(ai.getOverallScore() != null ? ai.getOverallScore() * 10f : 0f);
-                } catch (Exception e) {
-                    log.warn("Writing AI score failed for answer {}: {}", a.getId(), e.getMessage());
-                    parts.add(0f);
-                }
-            }
-        }
-        return parts.isEmpty() ? null : average(parts);
-    }
-
-    private Float scoreSpeakingSection(Exam exam, List<Answer> answers) {
-        List<Float> parts = new ArrayList<>();
-        for (ExamSection sec : sectionsOf(exam)) {
-            for (Question q : questionsOf(sec)) {
-                if (!"SPEAKING".equals(normalizeType(q.getQuestionType()))) {
-                    continue;
-                }
-                Answer a = findAnswer(answers, q.getId());
-                String speakingRef = a != null ? a.getSpeakingAudioUrl() : null;
-                if (a == null || speakingRef == null || speakingRef.isBlank()) {
-                    parts.add(0f);
-                    continue;
-                }
-                try {
-                    var ai = aiScoringService.scoreSpeaking(SpeakingScoreRequest.builder()
-                            .answerId(a.getId())
-                            .audioUrl(speakingRef)
-                            .build());
-                    parts.add(ai.getOverallScore() != null ? ai.getOverallScore() * 10f : 0f);
-                } catch (Exception e) {
-                    log.warn("Speaking AI score failed for answer {}: {}", a.getId(), e.getMessage());
-                    parts.add(0f);
-                }
-            }
-        }
-        return parts.isEmpty() ? null : average(parts);
-    }
-
     private static float combineScores(Float mc, Float writing, Float speaking) {
         List<Float> parts = new ArrayList<>();
         if (mc != null) parts.add(mc);
@@ -562,11 +520,6 @@ public class StudentExamService {
         }
         double sum = parts.stream().mapToDouble(Float::doubleValue).sum();
         return (float) (sum / parts.size());
-    }
-
-    private static float average(List<Float> values) {
-        double sum = values.stream().mapToDouble(Float::doubleValue).sum();
-        return (float) (sum / values.size());
     }
 
     private static Answer findAnswer(List<Answer> answers, Integer questionId) {

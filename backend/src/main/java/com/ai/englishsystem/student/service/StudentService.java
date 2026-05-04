@@ -4,10 +4,13 @@ import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
 import com.ai.englishsystem.common.util.SecurityUtils;
+import com.ai.englishsystem.classmodule.repository.ClassStudentRepository;
 import com.ai.englishsystem.student.dto.StudentRequest;
 import com.ai.englishsystem.student.dto.StudentResponse;
+import com.ai.englishsystem.student.dto.StudentUpdateRequest;
 import com.ai.englishsystem.student.entity.Student;
 import com.ai.englishsystem.student.repository.StudentRepository;
+import com.ai.englishsystem.submission.repository.SubmissionRepository;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +26,8 @@ public class StudentService {
 
     private final StudentRepository studentRepository;
     private final UserRepository userRepository;
+    private final SubmissionRepository submissionRepository;
+    private final ClassStudentRepository classStudentRepository;
 
     @Transactional(readOnly = true)
     public StudentResponse getCurrentStudent() {
@@ -56,6 +61,56 @@ public class StudentService {
 
         student = studentRepository.save(student);
         return toResponse(student);
+    }
+
+    @Transactional(readOnly = true)
+    public StudentResponse findById(Integer id) {
+        Student student = studentRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Student", id));
+        return toResponse(student);
+    }
+
+    @Transactional
+    public StudentResponse update(Integer id, StudentUpdateRequest request) {
+        Student student = studentRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Student", id));
+        User user = student.getUser();
+
+        if (request.getStudentCode() != null && !request.getStudentCode().isBlank()) {
+            String code = request.getStudentCode().trim();
+            if (studentRepository.existsByStudentCodeAndIdNot(code, id)) {
+                throw new BadRequestException("Student code already exists");
+            }
+            student.setStudentCode(code);
+        }
+        if (request.getDateOfBirth() != null) {
+            student.setDateOfBirth(request.getDateOfBirth());
+        }
+        if (request.getFullName() != null && !request.getFullName().isBlank()) {
+            user.setFullName(request.getFullName().trim());
+        }
+        if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            String email = request.getEmail().trim();
+            if (userRepository.existsByEmailAndIdNot(email, user.getId())) {
+                throw new BadRequestException("Email already exists");
+            }
+            user.setEmail(email);
+        }
+
+        userRepository.save(user);
+        studentRepository.save(student);
+        return toResponse(student);
+    }
+
+    @Transactional
+    public void delete(Integer id) {
+        Student student = studentRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Student", id));
+        if (submissionRepository.existsByStudent_Id(id)) {
+            throw new BadRequestException("Cannot delete a student who has exam submissions");
+        }
+        classStudentRepository.deleteByStudentId(id);
+        studentRepository.delete(student);
     }
 
     private StudentResponse toResponse(Student student) {

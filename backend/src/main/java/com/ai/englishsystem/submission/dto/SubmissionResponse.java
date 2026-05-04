@@ -14,6 +14,10 @@ import java.time.LocalDateTime;
 public class SubmissionResponse {
     private Integer id;
     private Integer examId;
+    /** Exam title for result/history UIs (nullable for legacy clients). */
+    private String examTitle;
+    /** OFFICIAL or PRACTICE when configured on the exam. */
+    private String examType;
     private Integer studentId;
     private Integer attemptId;
     private Integer durationMinutes;

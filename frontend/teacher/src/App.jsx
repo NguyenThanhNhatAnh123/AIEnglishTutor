@@ -5,6 +5,7 @@ import { ToastProvider } from './context/ToastContext';
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import ClassManagement from './pages/ClassManagement';
+import Students from './pages/Students';
 import ExamManagement from './pages/ExamManagement';
 import QuestionBank from './pages/QuestionBank';
 import StudentResults from './pages/StudentResults';
@@ -23,6 +24,7 @@ function AppRoutes() {
 
       <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
       <Route path="/classes" element={<PrivateRoute><ClassManagement /></PrivateRoute>} />
+      <Route path="/students" element={<PrivateRoute><Students /></PrivateRoute>} />
       <Route path="/exams" element={<PrivateRoute><ExamManagement /></PrivateRoute>} />
       <Route path="/questions" element={<PrivateRoute><QuestionBank /></PrivateRoute>} />
       <Route path="/results" element={<PrivateRoute><StudentResults /></PrivateRoute>} />

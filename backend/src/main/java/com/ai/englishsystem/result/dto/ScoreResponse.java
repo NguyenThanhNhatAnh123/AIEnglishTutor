@@ -27,4 +27,10 @@ public class ScoreResponse {
     private String deviceLabel;
     private Integer gradedBy;
     private LocalDateTime gradedAt;
+    private String writingReviewStatus;
+    private Boolean writingReviewPublished;
+    private String writingReviewMessage;
+    private String speakingReviewStatus;
+    private Boolean speakingReviewPublished;
+    private String speakingReviewMessage;
 }

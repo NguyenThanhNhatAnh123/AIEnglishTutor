@@ -33,7 +33,7 @@ public class UserController {
     }
 
     @PostMapping
-    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('ADMIN', 'TEACHER')")
     public ResponseEntity<ApiResponse<UserResponse>> create(@Valid @RequestBody UserRequest request) {
         UserResponse user = userService.create(request);
         return ResponseEntity.ok(ApiResponse.success("User created", user));

@@ -32,6 +32,7 @@ function ExamFormModal({ exam, onClose, onSuccess }) {
     description: exam?.description || '',
     durationMinutes: exam?.durationMinutes || 60,
     status: exam?.status || 'DRAFT',
+    examType: exam?.examType || 'PRACTICE',
   });
   const [loading, setLoading] = useState(false);
   const toast = useToast();
@@ -42,7 +43,11 @@ function ExamFormModal({ exam, onClose, onSuccess }) {
     e.preventDefault();
     setLoading(true);
     try {
-      const payload = { ...form, durationMinutes: parseInt(form.durationMinutes, 10) };
+      const payload = {
+        ...form,
+        durationMinutes: parseInt(form.durationMinutes, 10),
+        examType: form.examType || 'PRACTICE',
+      };
       if (exam) {
         await examApi.update(exam.id, payload);
         toast.success('Exam updated.');
@@ -79,6 +84,17 @@ function ExamFormModal({ exam, onClose, onSuccess }) {
           rows={3}
           className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-sky-300 resize-none"
         />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1.5">Exam type</label>
+        <select
+          value={form.examType}
+          onChange={set('examType')}
+          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
+        >
+          <option value="PRACTICE">Practice (multiple attempts)</option>
+          <option value="OFFICIAL">Official (one completed attempt)</option>
+        </select>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -232,6 +248,7 @@ export default function ExamManagement() {
                     Exam
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Type</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Duration</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Sections</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">
@@ -260,6 +277,13 @@ export default function ExamManagement() {
                     </td>
                     <td className="px-4 py-3 align-top">
                       <Badge status={e.status} label={e.status} />
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${
+                        e.examType === 'OFFICIAL' ? 'bg-amber-100 text-amber-800' : 'bg-sky-100 text-sky-800'
+                      }`}>
+                        {e.examType === 'OFFICIAL' ? 'Official' : 'Practice'}
+                      </span>
                     </td>
                     <td className="px-4 py-3 text-slate-600 align-top whitespace-nowrap">
                       {e.durationMinutes} min

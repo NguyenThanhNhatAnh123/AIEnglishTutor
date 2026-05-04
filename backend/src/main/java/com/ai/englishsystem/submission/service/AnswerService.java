@@ -12,6 +12,9 @@ import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.exam.entity.ExamSection;
 import com.ai.englishsystem.exam.entity.Question;
 import com.ai.englishsystem.exam.service.StudentExamService;
+import com.ai.englishsystem.result.entity.Feedback;
+import com.ai.englishsystem.result.entity.WritingReviewStatus;
+import com.ai.englishsystem.result.repository.FeedbackRepository;
 import com.ai.englishsystem.exam.repository.QuestionRepository;
 import com.ai.englishsystem.student.entity.Student;
 import com.ai.englishsystem.student.repository.StudentRepository;
@@ -35,6 +38,7 @@ public class AnswerService {
     private final QuestionRepository questionRepository;
     private final StudentRepository studentRepository;
     private final StudentExamService studentExamService;
+    private final FeedbackRepository feedbackRepository;
 
     @Transactional
     public AnswerResponse saveOrUpdate(AnswerRequest request) {
@@ -82,7 +86,7 @@ public class AnswerService {
                     .build();
         }
         answer = answerRepository.save(answer);
-        return toResponse(answer);
+        return toResponse(answer, null, false);
     }
 
     private boolean questionBelongsToExam(Question question, com.ai.englishsystem.exam.entity.Exam exam) {
@@ -160,8 +164,16 @@ public class AnswerService {
             throw new ForbiddenException("Cannot view another student's answers");
         }
 
-        return answerRepository.findBySubmissionFetchQuestion(submission).stream()
-                .map(this::toResponse)
+        List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
+        Map<Integer, Feedback> feedbackByAnswerId = feedbackRepository.findByAnswerIn(answers).stream()
+                .filter(f -> f.getAnswer() != null && f.getAnswer().getId() != null)
+                .collect(Collectors.toMap(f -> f.getAnswer().getId(), f -> f));
+
+        boolean submitted = submission.getStatus() != SubmissionStatus.IN_PROGRESS;
+        return answers.stream()
+                .map(answer -> submitted
+                        ? toResponse(answer, feedbackByAnswerId.get(answer.getId()), true)
+                        : toResponse(answer, null, false))
                 .collect(Collectors.toList());
     }
 
@@ -175,8 +187,13 @@ public class AnswerService {
 
         assertTeacherCanAccess(submission);
 
-        return answerRepository.findBySubmissionFetchQuestion(submission).stream()
-                .map(this::toResponse)
+        List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
+        Map<Integer, Feedback> feedbackByAnswerId = feedbackRepository.findByAnswerIn(answers).stream()
+                .filter(f -> f.getAnswer() != null && f.getAnswer().getId() != null)
+                .collect(Collectors.toMap(f -> f.getAnswer().getId(), f -> f));
+
+        return answers.stream()
+                .map(answer -> toResponse(answer, feedbackByAnswerId.get(answer.getId()), false))
                 .collect(Collectors.toList());
     }
 
@@ -194,15 +211,20 @@ public class AnswerService {
             assertTeacherCanAccess(submission);
         }
 
-        Map<Integer, List<AnswerResponse>> grouped = answerRepository.findBySubmissionIdInFetchQuestion(submissionIds).stream()
-                .map(this::toResponse)
+        List<Answer> fetchedAnswers = answerRepository.findBySubmissionIdInFetchQuestion(submissionIds);
+        Map<Integer, Feedback> feedbackByAnswerId = feedbackRepository.findByAnswerIn(fetchedAnswers).stream()
+                .filter(f -> f.getAnswer() != null && f.getAnswer().getId() != null)
+                .collect(Collectors.toMap(f -> f.getAnswer().getId(), f -> f));
+
+        Map<Integer, List<AnswerResponse>> grouped = fetchedAnswers.stream()
+                .map(answer -> toResponse(answer, feedbackByAnswerId.get(answer.getId()), false))
                 .collect(Collectors.groupingBy(AnswerResponse::getSubmissionId));
 
         for (Integer submissionId : submissionIds) {
             grouped.computeIfAbsent(submissionId, ignored -> List.of());
         }
 
-        grouped.replaceAll((ignored, answers) -> answers.stream()
+        grouped.replaceAll((ignored, answerList) -> answerList.stream()
                 .sorted(Comparator.comparing(AnswerResponse::getQuestionId, Comparator.nullsLast(Integer::compareTo)))
                 .collect(Collectors.toList()));
 
@@ -224,11 +246,22 @@ public class AnswerService {
         throw new ForbiddenException("Not allowed");
     }
 
-    private AnswerResponse toResponse(Answer answer) {
+    private AnswerResponse toResponse(Answer answer, Feedback feedback, boolean maskUnpublishedReviewsForStudent) {
+        String type = answer.getQuestion() != null ? answer.getQuestion().getQuestionType() : null;
+        boolean isWriting = "WRITING".equalsIgnoreCase(type != null ? type.trim() : "");
+        boolean isSpeaking = "SPEAKING".equalsIgnoreCase(type != null ? type.trim() : "");
+        WritingReviewStatus status = feedback != null && feedback.getReviewStatus() != null
+                ? feedback.getReviewStatus() : WritingReviewStatus.DRAFT;
+        boolean published = status == WritingReviewStatus.PUBLISHED;
+        boolean hideTeacherFields = maskUnpublishedReviewsForStudent && !published;
+
+        String questionText = answer.getQuestion() != null ? answer.getQuestion().getQuestionText() : null;
+
         return AnswerResponse.builder()
                 .id(answer.getId())
                 .submissionId(answer.getSubmission().getId())
                 .questionId(answer.getQuestion().getId())
+                .questionText(questionText)
                 .questionType(answer.getQuestion().getQuestionType())
                 .answerText(answer.getAnswerText())
                 .selectedOptionId(answer.getSelectedOptionId())
@@ -236,6 +269,20 @@ public class AnswerService {
                 .speakingDurationSeconds(answer.getSpeakingDurationSeconds())
                 .speakingFormat(answer.getSpeakingFormat())
                 .imageUrl(answer.getImageUrl())
+                .writingReviewStatus(isWriting ? status.name() : null)
+                .writingDraftScore(isWriting && feedback != null && !hideTeacherFields ? feedback.getDraftScore() : null)
+                .writingDraftFeedback(isWriting && feedback != null && !hideTeacherFields ? feedback.getAiFeedback() : null)
+                .writingPublishedScore(isWriting && feedback != null && published ? feedback.getPublishedScore() : null)
+                .writingPublishedFeedback(isWriting && feedback != null && published ? feedback.getTeacherFeedback() : null)
+                .writingPublishedAt(isWriting && feedback != null && published ? feedback.getPublishedAt() : null)
+                .speakingReviewStatus(isSpeaking ? status.name() : null)
+                .speakingDraftScore(isSpeaking && feedback != null && !hideTeacherFields ? feedback.getDraftScore() : null)
+                .speakingDraftFeedback(isSpeaking && feedback != null && !hideTeacherFields ? feedback.getAiFeedback() : null)
+                .speakingDraftTranscript(isSpeaking && feedback != null && !hideTeacherFields ? feedback.getDraftTranscript() : null)
+                .speakingPublishedScore(isSpeaking && feedback != null && published ? feedback.getPublishedScore() : null)
+                .speakingPublishedFeedback(isSpeaking && feedback != null && published ? feedback.getTeacherFeedback() : null)
+                .speakingPublishedTranscript(isSpeaking && feedback != null && published ? feedback.getPublishedTranscript() : null)
+                .speakingPublishedAt(isSpeaking && feedback != null && published ? feedback.getPublishedAt() : null)
                 .build();
     }
 }

@@ -19,7 +19,7 @@ export default function LoginPage() {
     try {
       const res = await authApi.login({ email, password });
       const data = res.data?.data;
-      // FIX: backend trả "accessToken" không phải "token"
+      // Auth payload uses accessToken (not token)
       if (data?.accessToken) {
         const role = (data.role || '').toUpperCase();
         if (role === 'STUDENT') {

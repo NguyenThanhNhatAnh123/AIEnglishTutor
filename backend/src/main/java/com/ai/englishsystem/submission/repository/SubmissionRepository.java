@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,4 +38,12 @@ public interface SubmissionRepository extends JpaRepository<Submission, Integer>
     @EntityGraph(attributePaths = {"exam", "student", "student.user"})
     @Query("SELECT s FROM Submission s WHERE s.student = :student ORDER BY s.startTime DESC")
     List<Submission> findByStudentOrderByStartTimeDesc(@Param("student") Student student);
+
+    boolean existsByExam_IdAndStudent_IdAndStatusIn(
+            Integer examId,
+            Integer studentId,
+            Collection<SubmissionStatus> statuses
+    );
+
+    boolean existsByStudent_Id(Integer studentId);
 }
