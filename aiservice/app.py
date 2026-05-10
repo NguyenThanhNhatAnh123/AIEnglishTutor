@@ -1,11 +1,13 @@
 import io
 import os
+import sys
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from PIL import Image
@@ -13,8 +15,46 @@ from PIL import Image
 
 app = FastAPI(title="AI Service (STT + OCR + TTS)")
 
+# ── CORS (allow backend + dev frontends) ──────────────────────────────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _whisper_model = None
+_models_ready = False
+_vietocr_predictor = None
+
+
+def _get_vietocr_predictor():
+    """Lazily initialize and cache VietOCR predictor (Bug #6 fix — was created per request)."""
+    global _vietocr_predictor
+    if _vietocr_predictor is not None:
+        return _vietocr_predictor
+
+    from vietocr.tool.config import Cfg  # type: ignore
+    from vietocr.tool.predictor import Predictor  # type: ignore
+
+    cfg_name = os.environ.get("VIET_OCR_CFG", "vgg_transformer")
+    cfg = Cfg.load_config_from_name(cfg_name)
+    cfg["device"] = os.environ.get("VIET_OCR_DEVICE", "cpu")
+
+    weights = os.environ.get("VIET_OCR_WEIGHTS")
+    if weights:
+        cfg["weights"] = weights
+
+    _vietocr_predictor = Predictor(cfg)
+    return _vietocr_predictor
 
 
 def _get_whisper_model():
@@ -34,6 +74,53 @@ def _get_whisper_model():
         compute_type=compute_type,
     )
     return _whisper_model
+
+
+# ── Health check ─────────────────────────────────────────────────────────
+@app.get("/health")
+async def health():
+    """Returns service status and model availability."""
+    status = {
+        "status": "ok",
+        "service": "aiservice",
+        "whisper_loaded": _whisper_model is not None,
+        "python_version": sys.version,
+    }
+    # Check optional dependencies
+    try:
+        import vietocr  # type: ignore # noqa: F401
+        status["vietocr_available"] = True
+    except ImportError:
+        status["vietocr_available"] = False
+    try:
+        import pytesseract  # type: ignore # noqa: F401
+        status["tesseract_available"] = True
+    except ImportError:
+        status["tesseract_available"] = False
+    try:
+        import edge_tts  # type: ignore # noqa: F401
+        status["edge_tts_available"] = True
+    except ImportError:
+        status["edge_tts_available"] = False
+
+    return JSONResponse(status)
+
+
+# ── Startup: preload Whisper model if configured ─────────────────────────
+@app.on_event("startup")
+async def startup_event():
+    global _models_ready
+    preload = os.environ.get("WHISPER_PRELOAD", "1").strip()
+    if preload in ("1", "true", "yes"):
+        try:
+            _get_whisper_model()
+            _models_ready = True
+            print("[aiservice] Whisper model preloaded successfully")
+        except Exception as e:
+            print(f"[aiservice] WARNING: Whisper preload failed: {e}")
+            print("[aiservice] Model will load on first /transcribe request")
+    else:
+        print("[aiservice] Whisper preload disabled (set WHISPER_PRELOAD=1 to enable)")
 
 
 @app.post("/transcribe")
@@ -80,18 +167,7 @@ async def transcribe(
 
 
 def _ocr_with_vietocr(img: Image.Image) -> str:
-    from vietocr.tool.config import Cfg  # type: ignore
-    from vietocr.tool.predictor import Predictor  # type: ignore
-
-    cfg_name = os.environ.get("VIET_OCR_CFG", "vgg_transformer")
-    cfg = Cfg.load_config_from_name(cfg_name)
-    cfg["device"] = os.environ.get("VIET_OCR_DEVICE", "cpu")
-
-    weights = os.environ.get("VIET_OCR_WEIGHTS")
-    if weights:
-        cfg["weights"] = weights
-
-    predictor = Predictor(cfg)
+    predictor = _get_vietocr_predictor()
     text = predictor.predict(img)
     return (text or "").strip()
 

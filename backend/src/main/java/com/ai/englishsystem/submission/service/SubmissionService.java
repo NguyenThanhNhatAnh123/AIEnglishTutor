@@ -10,6 +10,8 @@ import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.repository.ExamRepository;
 import com.ai.englishsystem.exam.service.StudentExamService;
 import com.ai.englishsystem.result.entity.Score;
+import com.ai.englishsystem.result.entity.Feedback;
+import com.ai.englishsystem.result.entity.WritingReviewStatus;
 import com.ai.englishsystem.result.repository.FeedbackRepository;
 import com.ai.englishsystem.result.repository.ScoreRepository;
 import com.ai.englishsystem.speaking.service.SpeakingFileStorage;
@@ -25,6 +27,7 @@ import com.ai.englishsystem.submission.entity.Submission;
 import com.ai.englishsystem.submission.entity.SubmissionStatus;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
 import com.ai.englishsystem.submission.repository.SubmissionRepository;
+import com.ai.englishsystem.submission.repository.SubmissionSuspiciousEventRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
@@ -35,6 +38,9 @@ import java.net.MalformedURLException;
 import java.time.ZoneId;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -51,6 +57,7 @@ public class SubmissionService {
     private final FeedbackRepository feedbackRepository;
     private final SpeakingFileStorage speakingFileStorage;
     private final ScoreService scoreService;
+    private final SubmissionSuspiciousEventRepository submissionSuspiciousEventRepository;
 
     @Transactional
     public SubmissionResponse start(StartSubmissionRequest request) {
@@ -104,8 +111,19 @@ public class SubmissionService {
             }
         }
 
-        return submissionRepository.findByExam(exam).stream()
-                .map(s -> toListResponse(s, fetchTotalScore(s)))
+        List<Submission> submissions = submissionRepository.findByExamOrderByLatestWorkDateDesc(exam);
+        if (submissions.isEmpty()) {
+            return List.of();
+        }
+        Map<Integer, Float> scoreBySubmissionId = scoreRepository.findBySubmissionIn(submissions).stream()
+                .collect(Collectors.toMap(
+                        sc -> sc.getSubmission().getId(),
+                        Score::getTotalScore,
+                        (a, b) -> a
+                ));
+
+        return submissions.stream()
+                .map(s -> toListResponse(s, scoreBySubmissionId.get(s.getId())))
                 .collect(Collectors.toList());
     }
 
@@ -118,20 +136,79 @@ public class SubmissionService {
         Student student = studentRepository.findByUser_Id(userId)
                 .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
 
-        return submissionRepository.findByStudentOrderByStartTimeDesc(student).stream()
-                .map(s -> toListResponse(s, resolveStudentVisibleTotalScore(s)))
+        List<Submission> submissions = submissionRepository.findByStudentOrderByStartTimeDesc(student);
+        List<Integer> submissionIds = submissions.stream().map(Submission::getId).toList();
+
+        // Batch load scores to avoid N+1 (Bug fix: LOW-04)
+        Map<Integer, Float> scoreBySubmissionId = scoreRepository.findBySubmissionIn(submissions).stream()
+                .collect(Collectors.toMap(
+                        sc -> sc.getSubmission().getId(),
+                        Score::getTotalScore,
+                        (a, b) -> a // pick first if duplicate
+                ));
+
+        Map<Integer, Boolean> subjectivePublishedBySubmissionId = resolveSubjectiveVisibility(submissionIds);
+
+        return submissions.stream()
+                .map(s -> toListResponse(s, resolveStudentVisibleTotalScore(s, scoreBySubmissionId, subjectivePublishedBySubmissionId)))
                 .collect(Collectors.toList());
     }
 
-    private Float resolveStudentVisibleTotalScore(Submission s) {
+    private Float resolveStudentVisibleTotalScore(
+            Submission s,
+            Map<Integer, Float> scoreMap,
+            Map<Integer, Boolean> subjectivePublishedBySubmissionId
+    ) {
         if (s.getStatus() == SubmissionStatus.IN_PROGRESS) {
             return null;
         }
-        try {
-            return scoreService.getBySubmissionId(s.getId()).getTotalScore();
-        } catch (NotFoundException ex) {
+        if (!subjectivePublishedBySubmissionId.getOrDefault(s.getId(), true)) {
             return null;
         }
+        return scoreMap.get(s.getId());
+    }
+
+    private Map<Integer, Boolean> resolveSubjectiveVisibility(List<Integer> submissionIds) {
+        if (submissionIds == null || submissionIds.isEmpty()) {
+            return Map.of();
+        }
+
+        List<Answer> answers = answerRepository.findBySubmissionIdInFetchQuestion(submissionIds);
+        Map<Integer, Feedback> feedbackByAnswerId = feedbackRepository.findByAnswerIn(answers).stream()
+                .filter(feedback -> feedback.getAnswer() != null && feedback.getAnswer().getId() != null)
+                .collect(Collectors.toMap(feedback -> feedback.getAnswer().getId(), Function.identity()));
+
+        Map<Integer, List<Answer>> answersBySubmissionId = answers.stream()
+                .collect(Collectors.groupingBy(answer -> answer.getSubmission().getId()));
+
+        return submissionIds.stream()
+                .collect(Collectors.toMap(
+                        Function.identity(),
+                        submissionId -> subjectiveAnswersPublished(answersBySubmissionId.getOrDefault(submissionId, List.of()), feedbackByAnswerId)
+                ));
+    }
+
+    private boolean subjectiveAnswersPublished(List<Answer> answers, Map<Integer, Feedback> feedbackByAnswerId) {
+        List<Answer> subjectiveAnswers = answers.stream()
+                .filter(this::isSubjectiveQuestion)
+                .toList();
+        if (subjectiveAnswers.isEmpty()) {
+            return true;
+        }
+        return subjectiveAnswers.stream()
+                .allMatch(answer -> {
+                    Feedback feedback = feedbackByAnswerId.get(answer.getId());
+                    return feedback != null && feedback.getReviewStatus() == WritingReviewStatus.PUBLISHED;
+                });
+    }
+
+    private boolean isSubjectiveQuestion(Answer answer) {
+        String type = answer.getQuestion() != null ? answer.getQuestion().getQuestionType() : null;
+        if (type == null) {
+            return false;
+        }
+        String normalized = type.trim().toUpperCase();
+        return Set.of("WRITING", "SPEAKING").contains(normalized);
     }
 
     /**
@@ -192,12 +269,6 @@ public class SubmissionService {
                 .build();
     }
 
-    private Float fetchTotalScore(Submission s) {
-        return scoreRepository.findFirstBySubmissionOrderByIdAsc(s)
-                .map(Score::getTotalScore)
-                .orElse(null);
-    }
-
     private SubmissionListResponse toListResponse(Submission s, Float totalScore) {
         LocalDateTime end = s.getEndTime() != null ? s.getEndTime() : s.getSubmitTime();
         return SubmissionListResponse.builder()
@@ -251,6 +322,8 @@ public class SubmissionService {
             speakingFileStorage.deleteIfExists(a.getSpeakingAudioUrl());
         }
         scoreRepository.findFirstBySubmissionOrderByIdAsc(submission).ifPresent(scoreRepository::delete);
+        // Delete suspicious events BEFORE deleting submission (Bug #4 fix)
+        submissionSuspiciousEventRepository.deleteBySubmission(submission);
         submissionRepository.delete(submission);
     }
 

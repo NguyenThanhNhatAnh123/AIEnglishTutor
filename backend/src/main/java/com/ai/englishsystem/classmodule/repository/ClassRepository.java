@@ -15,4 +15,7 @@ public interface ClassRepository extends JpaRepository<ClassEntity, Integer> {
 
     @Query("SELECT COUNT(cs) FROM ClassStudent cs WHERE cs.classEntity.id = :classId")
     long countStudentsByClassId(@Param("classId") Integer classId);
+
+    @Query("SELECT c FROM ClassEntity c WHERE c.teacher.user.id = :userId ORDER BY c.id DESC")
+    List<ClassEntity> findByTeacherUserIdOrderByIdDesc(@Param("userId") Integer userId);
 }

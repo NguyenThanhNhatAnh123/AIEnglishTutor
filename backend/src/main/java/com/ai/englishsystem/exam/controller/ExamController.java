@@ -20,9 +20,10 @@ public class ExamController {
 
     private final ExamService examService;
 
-    // STUDENTS, TEACHERS and ADMINS can read all exams
+    // Only TEACHERS and ADMINS can list all exams (including DRAFT/CLOSED).
+    // Students must use /api/student/exams which only returns ACTIVE exams.
     @GetMapping
-    @PreAuthorize("hasAnyRole('STUDENT', 'TEACHER', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<ApiResponse<List<ExamResponse>>> getAll() {
         return ResponseEntity.ok(ApiResponse.success(examService.findAll()));
     }

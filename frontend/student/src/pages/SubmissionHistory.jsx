@@ -23,7 +23,8 @@ export default function SubmissionHistory() {
         toast.error(msg);
       })
       .finally(() => setLoading(false));
-  }, [toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = submissions.filter((s) => {
     const name = (s.examTitle || `Exam #${s.examId}`).toLowerCase();

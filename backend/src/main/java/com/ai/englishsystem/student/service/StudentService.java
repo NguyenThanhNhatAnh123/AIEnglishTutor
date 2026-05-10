@@ -14,6 +14,7 @@ import com.ai.englishsystem.submission.repository.SubmissionRepository;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,7 +60,11 @@ public class StudentService {
                 .dateOfBirth(request.getDateOfBirth())
                 .build();
 
-        student = studentRepository.save(student);
+        try {
+            student = studentRepository.save(student);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BadRequestException("Student code already exists");
+        }
         return toResponse(student);
     }
 
@@ -97,8 +102,12 @@ public class StudentService {
             user.setEmail(email);
         }
 
-        userRepository.save(user);
-        studentRepository.save(student);
+        try {
+            userRepository.save(user);
+            studentRepository.save(student);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BadRequestException("Email or student code already exists");
+        }
         return toResponse(student);
     }
 

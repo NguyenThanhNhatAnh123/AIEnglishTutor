@@ -1,163 +1,318 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { classApi, examApi, questionApi, API_ORIGIN } from '../services/api';
+import { classApi, examApi, questionApi, submissionApi } from '../services/api';
 import Layout from '../components/Layout';
 import { PageLoader } from '../components/common/LoadingSpinner';
 
-function KpiCard({ label, value, icon, color, to }) {
-  const inner = (
-    <div className={`card flex items-center gap-4 hover:shadow-md transition-shadow ${to ? 'cursor-pointer' : ''}`}>
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${color}`}>{icon}</div>
-      <div>
-        <p className="text-2xl font-bold text-slate-800">{value ?? '—'}</p>
-        <p className="text-sm text-slate-500">{label}</p>
-      </div>
+function StatCard({ label, value, hint, tone = 'slate' }) {
+  const toneMap = {
+    slate: 'bg-slate-50 border-slate-200 text-slate-700',
+    blue: 'bg-blue-50 border-blue-200 text-blue-700',
+    emerald: 'bg-emerald-50 border-emerald-200 text-emerald-700',
+    amber: 'bg-amber-50 border-amber-200 text-amber-700',
+    violet: 'bg-violet-50 border-violet-200 text-violet-700',
+    rose: 'bg-rose-50 border-rose-200 text-rose-700',
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${toneMap[tone] || toneMap.slate}`}>
+      <p className="text-xs uppercase tracking-wide font-semibold opacity-80">{label}</p>
+      <p className="text-2xl font-bold mt-2">{value}</p>
+      {hint && <p className="text-xs mt-1 opacity-80">{hint}</p>}
     </div>
   );
-  return to ? <Link to={to}>{inner}</Link> : inner;
+}
+
+function toNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function latestWorkTime(submission) {
+  return new Date(submission.endTime || submission.submitTime || submission.startTime || 0).getTime();
+}
+
+function formatScore(value) {
+  if (value == null || Number.isNaN(Number(value))) return '-';
+  return Number(value).toFixed(1);
+}
+
+function statusPill(status) {
+  const normalized = (status || '').toUpperCase();
+  if (normalized === 'SUBMITTED' || normalized === 'AUTO_SUBMITTED') {
+    return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+  }
+  if (normalized === 'IN_PROGRESS') {
+    return 'text-amber-700 bg-amber-50 border-amber-200';
+  }
+  return 'text-slate-700 bg-slate-50 border-slate-200';
 }
 
 export default function Dashboard() {
-  const [stats, setStats] = useState({ classes: 0, exams: 0, pending: 0 });
-  const [recentExams, setRecentExams] = useState([]);
-  const [audioQuestions, setAudioQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [classes, setClasses] = useState([]);
+  const [exams, setExams] = useState([]);
+  const [questions, setQuestions] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
 
   useEffect(() => {
-    Promise.all([
-      classApi.getAll().then((r) => r.data?.data || []),
-      examApi.getAll().then((r) => r.data?.data || []),
-      questionApi.getAll().then((r) => r.data?.data || []),
-    ])
-      .then(([classes, exams, questions]) => {
-        const activeExams = exams.filter((e) => e.status === 'ACTIVE');
-        const listeningWithAudio = questions.filter(
-          (q) => q.questionType === 'LISTENING' && typeof q.listeningAudioUrl === 'string' && q.listeningAudioUrl.length > 0
+    let cancelled = false;
+    (async () => {
+      try {
+        const [classRes, examRes, questionRes] = await Promise.all([
+          classApi.getAll().then((r) => r.data?.data || []),
+          examApi.getAll().then((r) => r.data?.data || []),
+          questionApi.getAll().then((r) => r.data?.data || []),
+        ]);
+
+        if (cancelled) return;
+        setClasses(classRes);
+        setExams(examRes);
+        setQuestions(questionRes);
+
+        const manageableExams = examRes.filter((e) => e.canManage !== false);
+        const submissionBatches = await Promise.all(
+          manageableExams.map((e) =>
+            submissionApi.getByExamId(e.id)
+              .then((r) => r.data?.data || [])
+              .catch(() => [])
+          )
         );
-        setStats({
-          classes: classes.length,
-          exams: activeExams.length,
-          total: exams.length,
-          listeningAudio: listeningWithAudio.length,
-        });
-        setRecentExams(exams.slice(0, 5));
-        setAudioQuestions(listeningWithAudio.slice(0, 5));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+        if (!cancelled) {
+          setSubmissions(submissionBatches.flat());
+        }
+      } catch {
+        if (!cancelled) {
+          setClasses([]);
+          setExams([]);
+          setQuestions([]);
+          setSubmissions([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  if (loading) return (
-    <Layout>
-      <PageLoader />
-    </Layout>
-  );
+  const stats = useMemo(() => {
+    const manageableExams = exams.filter((e) => e.canManage !== false);
+    const activeExams = manageableExams.filter((e) => (e.status || '').toUpperCase() === 'ACTIVE');
+    const completedStatuses = new Set(['SUBMITTED', 'AUTO_SUBMITTED']);
+    const completedSubs = submissions.filter((s) => completedStatuses.has((s.status || '').toUpperCase()));
+    const inProgressSubs = submissions.filter((s) => (s.status || '').toUpperCase() === 'IN_PROGRESS');
+    const gradedSubs = completedSubs.filter((s) => s.totalScore != null);
+    const suspiciousSubs = submissions.filter((s) => toNumber(s.suspiciousEventCount) > 0);
+
+    const totalScore = gradedSubs.reduce((sum, s) => sum + toNumber(s.totalScore), 0);
+    const averageScore = gradedSubs.length ? totalScore / gradedSubs.length : null;
+    const passCount = gradedSubs.filter((s) => toNumber(s.totalScore) >= 50).length;
+    const passRate = gradedSubs.length ? Math.round((passCount / gradedSubs.length) * 100) : 0;
+
+    const examAggMap = new Map();
+    submissions.forEach((s) => {
+      const key = s.examId;
+      const current = examAggMap.get(key) || {
+        examId: s.examId,
+        examTitle: s.examTitle || `Exam #${s.examId}`,
+        attempts: 0,
+        gradedAttempts: 0,
+        scoreSum: 0,
+        suspiciousAttempts: 0,
+      };
+      current.attempts += 1;
+      if (s.totalScore != null) {
+        current.gradedAttempts += 1;
+        current.scoreSum += toNumber(s.totalScore);
+      }
+      if (toNumber(s.suspiciousEventCount) > 0) {
+        current.suspiciousAttempts += 1;
+      }
+      examAggMap.set(key, current);
+    });
+    const examPerformance = [...examAggMap.values()]
+      .map((item) => ({
+        ...item,
+        avgScore: item.gradedAttempts ? (item.scoreSum / item.gradedAttempts) : null,
+      }))
+      .sort((a, b) => b.attempts - a.attempts)
+      .slice(0, 8);
+
+    const recentSubmissions = [...submissions]
+      .sort((a, b) => latestWorkTime(b) - latestWorkTime(a))
+      .slice(0, 10);
+
+    return {
+      manageableExams,
+      activeExams,
+      completedSubs,
+      inProgressSubs,
+      gradedSubs,
+      suspiciousSubs,
+      averageScore,
+      passRate,
+      examPerformance,
+      recentSubmissions,
+    };
+  }, [exams, submissions]);
+
+  if (loading) {
+    return (
+      <Layout>
+        <PageLoader />
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
       <div className="space-y-6">
-        {/* Welcome */}
-        <div className="rounded-2xl bg-gradient-to-r from-blue-800 to-blue-600 p-6 text-white">
-          <p className="text-blue-200 text-sm font-medium uppercase tracking-wider mb-1">Teacher Dashboard</p>
-          <h2 className="text-2xl font-bold">Welcome back! 👋</h2>
-          <p className="text-blue-100 mt-1 text-sm">Here&apos;s an overview of your platform activity.</p>
-        </div>
-
-        {/* KPI cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard label="Total Classes" value={stats.classes} to="/classes"
-            color="bg-blue-50 text-blue-600"
-            icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>}
-          />
-          <KpiCard label="Active Exams" value={stats.exams} to="/exams"
-            color="bg-green-50 text-green-600"
-            icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>}
-          />
-          <KpiCard label="Total Exams" value={stats.total} to="/exams"
-            color="bg-purple-50 text-purple-600"
-            icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>}
-          />
-          <KpiCard label="View Analytics" value="→" to="/analytics"
-            color="bg-amber-50 text-amber-600"
-            icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>}
-          />
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="section-title">Listening Audio (MP3 ready)</h3>
-            <Link to="/questions" className="text-sm text-blue-600 hover:underline font-medium">Manage questions →</Link>
-          </div>
-          <div className="card space-y-3">
-            <p className="text-sm text-slate-600">
-              Total listening questions with audio: <strong>{stats.listeningAudio ?? 0}</strong>
-            </p>
-            {audioQuestions.length === 0 ? (
-              <p className="text-sm text-slate-400">No listening audio found yet.</p>
-            ) : (
-              audioQuestions.map((q) => {
-                const src = q.listeningAudioUrl?.startsWith('http')
-                  ? q.listeningAudioUrl
-                  : `${API_ORIGIN}${q.listeningAudioUrl?.startsWith('/') ? '' : '/'}${q.listeningAudioUrl || ''}`;
-                return (
-                  <div key={q.id} className="border border-slate-100 rounded-xl p-3">
-                    <p className="text-xs text-slate-500 mb-1">{q.examTitle || 'Exam'} · {q.sectionName || 'Section'}</p>
-                    <p className="text-sm text-slate-700 line-clamp-2 mb-2">{q.questionText}</p>
-                    <audio controls className="w-full" src={src} />
-                  </div>
-                );
-              })
-            )}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide font-semibold text-slate-500">Teacher Analytics</p>
+              <h2 className="text-2xl font-bold text-slate-800 mt-1">Teaching Overview</h2>
+            </div>
+            <div className="flex items-center gap-3 text-sm">
+              <Link to="/results" className="text-blue-600 hover:underline">Results</Link>
+              <Link to="/exams" className="text-blue-600 hover:underline">Exams</Link>
+              <Link to="/questions" className="text-blue-600 hover:underline">Question Bank</Link>
+            </div>
           </div>
         </div>
 
-        {/* Recent exams table */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="section-title">Recent Exams</h3>
-            <Link to="/exams" className="text-sm text-blue-600 hover:underline font-medium">View all →</Link>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          <StatCard label="Classes" value={classes.length} hint="Managed classes" tone="blue" />
+          <StatCard label="Exams" value={stats.manageableExams.length} hint={`${stats.activeExams.length} active`} tone="emerald" />
+          <StatCard label="Questions" value={questions.length} hint="All question types" tone="violet" />
+          <StatCard label="Submissions" value={submissions.length} hint={`${stats.completedSubs.length} completed`} tone="slate" />
+          <StatCard label="In Progress" value={stats.inProgressSubs.length} hint="Open exam sessions" tone="amber" />
+          <StatCard label="Suspicious" value={stats.suspiciousSubs.length} hint="Attempts with warnings" tone="rose" />
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Score Quality</h3>
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-600">Average score</span>
+                <span className="font-semibold text-slate-800">{formatScore(stats.averageScore)}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-600">Pass rate (&gt;= 50)</span>
+                <span className="font-semibold text-slate-800">{stats.passRate}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div className="h-full bg-emerald-600" style={{ width: `${stats.passRate}%` }} />
+              </div>
+              <p className="text-xs text-slate-500">
+                Based on {stats.gradedSubs.length} graded submissions.
+              </p>
+            </div>
           </div>
-          <div className="card overflow-hidden !p-0">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-100">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Title</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Duration</th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Manage</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {recentExams.length === 0 ? (
-                  <tr><td colSpan={4} className="text-center py-8 text-slate-400">No exams yet.</td></tr>
-                ) : recentExams.map((e) => {
-                  const canManage = e.canManage !== false;
-                  return (
-                  <tr key={e.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-800">{e.title}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        e.status === 'ACTIVE' ? 'bg-green-100 text-green-700' :
-                        e.status === 'DRAFT' ? 'bg-slate-100 text-slate-600' : 'bg-red-100 text-red-600'
-                      }`}>{e.status}</span>
-                    </td>
-                    <td className="px-4 py-3 text-right text-slate-400">{e.durationMinutes} min</td>
-                    <td className="px-4 py-3 text-right text-xs">
-                      {canManage ? (
-                        <>
-                          <Link to="/exams" className="text-blue-600 hover:underline font-medium mr-2">Exams</Link>
-                          <Link to={`/questions?examId=${e.id}`} className="text-blue-600 hover:underline font-medium">Questions</Link>
-                        </>
-                      ) : (
-                        <span className="text-slate-400">View only</span>
-                      )}
-                    </td>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Exam Status Mix</h3>
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-600">Active exams</span>
+                <span className="font-semibold text-slate-800">{stats.activeExams.length}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-600">Non-active exams</span>
+                <span className="font-semibold text-slate-800">{Math.max(0, stats.manageableExams.length - stats.activeExams.length)}</span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div
+                  className="h-full bg-blue-600"
+                  style={{
+                    width: `${stats.manageableExams.length ? Math.round((stats.activeExams.length / stats.manageableExams.length) * 100) : 0}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs text-slate-500">
+                Active ratio across manageable exams.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-slate-700">Recent Submissions</h3>
+            <Link to="/results" className="text-sm text-blue-600 hover:underline">Open results</Link>
+          </div>
+          {stats.recentSubmissions.length === 0 ? (
+            <div className="p-6 text-sm text-slate-500">No submissions yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[820px]">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Student</th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Exam</th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Status</th>
+                    <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Score</th>
+                    <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Latest Time</th>
                   </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {stats.recentSubmissions.map((s) => (
+                    <tr key={s.id}>
+                      <td className="px-4 py-2 text-slate-700">{s.studentName || `Student #${s.studentId}`}</td>
+                      <td className="px-4 py-2 text-slate-700">{s.examTitle || `Exam #${s.examId}`}</td>
+                      <td className="px-4 py-2">
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${statusPill(s.status)}`}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-center font-semibold text-blue-700">{formatScore(s.totalScore)}</td>
+                      <td className="px-4 py-2 text-right text-xs text-slate-500">
+                        {(s.endTime || s.submitTime || s.startTime)
+                          ? new Date(s.endTime || s.submitTime || s.startTime).toLocaleString()
+                          : '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100">
+            <h3 className="text-sm font-semibold text-slate-700">Top Exam Performance</h3>
           </div>
+          {stats.examPerformance.length === 0 ? (
+            <div className="p-6 text-sm text-slate-500">No exam performance data yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[780px]">
+                <thead className="bg-slate-50 border-b border-slate-100">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Exam</th>
+                    <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Attempts</th>
+                    <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Avg Score</th>
+                    <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Suspicious</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {stats.examPerformance.map((item) => (
+                    <tr key={item.examId}>
+                      <td className="px-4 py-2 text-slate-700">{item.examTitle}</td>
+                      <td className="px-4 py-2 text-center font-semibold text-slate-700">{item.attempts}</td>
+                      <td className="px-4 py-2 text-center font-semibold text-blue-700">{formatScore(item.avgScore)}</td>
+                      <td className="px-4 py-2 text-center">
+                        <span className={`text-xs font-semibold ${item.suspiciousAttempts > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
+                          {item.suspiciousAttempts}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </Layout>

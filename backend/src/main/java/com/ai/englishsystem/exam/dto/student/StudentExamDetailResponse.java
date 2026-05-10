@@ -21,6 +21,8 @@ public class StudentExamDetailResponse {
 
     /** OFFICIAL or PRACTICE */
     private String examType;
+    /** Null means unlimited attempts. */
+    private Integer maxAttempts;
 
     private LocalDateTime createdAt;
     private List<StudentExamSectionResponse> sections;

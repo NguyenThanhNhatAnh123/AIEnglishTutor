@@ -11,6 +11,7 @@ import com.ai.englishsystem.user.dto.UserResponse;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -67,7 +68,11 @@ public class UserService {
                 .status(request.getStatus() != null ? request.getStatus() : "ACTIVE")
                 .build();
 
-        user = userRepository.save(user);
+        try {
+            user = userRepository.save(user);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BadRequestException("Email or username already exists");
+        }
         return toResponse(user);
     }
 

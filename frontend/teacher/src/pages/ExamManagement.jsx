@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { examApi } from '../services/api';
+import { classApi, examApi } from '../services/api';
 import Layout from '../components/Layout';
 import ExamSectionsModal from '../components/ExamSectionsModal';
 import Modal from '../components/common/Modal';
@@ -26,27 +26,54 @@ function formatExamCreated(value) {
   return '—';
 }
 
-function ExamFormModal({ exam, onClose, onSuccess }) {
+function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
   const [form, setForm] = useState({
     title: exam?.title || '',
     description: exam?.description || '',
     durationMinutes: exam?.durationMinutes || 60,
     status: exam?.status || 'DRAFT',
     examType: exam?.examType || 'PRACTICE',
+    maxAttempts: exam?.maxAttempts ?? (exam?.examType === 'OFFICIAL' ? 1 : ''),
+    allowedClassIds: Array.isArray(exam?.allowedClasses) ? exam.allowedClasses.map((c) => c.id) : [],
   });
   const [loading, setLoading] = useState(false);
   const toast = useToast();
 
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  const toggleAllowedClass = (classId) => {
+    setForm((prev) => {
+      const exists = prev.allowedClassIds.includes(classId);
+      return {
+        ...prev,
+        allowedClassIds: exists
+          ? prev.allowedClassIds.filter((id) => id !== classId)
+          : [...prev.allowedClassIds, classId],
+      };
+    });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
+      const parsedDuration = parseInt(form.durationMinutes, 10);
+      const parsedMaxAttempts = form.maxAttempts === '' ? null : parseInt(form.maxAttempts, 10);
+      if (!Number.isFinite(parsedDuration) || parsedDuration < 1) {
+        toast.error('Duration must be at least 1 minute.');
+        setLoading(false);
+        return;
+      }
+      if (parsedMaxAttempts != null && (!Number.isFinite(parsedMaxAttempts) || parsedMaxAttempts < 1)) {
+        toast.error('Max attempts must be at least 1.');
+        setLoading(false);
+        return;
+      }
       const payload = {
         ...form,
-        durationMinutes: parseInt(form.durationMinutes, 10),
+        durationMinutes: parsedDuration,
         examType: form.examType || 'PRACTICE',
+        maxAttempts: parsedMaxAttempts,
+        allowedClassIds: form.allowedClassIds,
       };
       if (exam) {
         await examApi.update(exam.id, payload);
@@ -89,12 +116,56 @@ function ExamFormModal({ exam, onClose, onSuccess }) {
         <label className="block text-sm font-medium text-slate-700 mb-1.5">Exam type</label>
         <select
           value={form.examType}
-          onChange={set('examType')}
+          onChange={(e) => {
+            const nextType = e.target.value;
+            setForm((prev) => ({
+              ...prev,
+              examType: nextType,
+              maxAttempts: nextType === 'OFFICIAL' && prev.maxAttempts === '' ? 1 : prev.maxAttempts,
+            }));
+          }}
           className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
         >
           <option value="PRACTICE">Practice (multiple attempts)</option>
           <option value="OFFICIAL">Official (one completed attempt)</option>
         </select>
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1.5">Max attempts</label>
+        <input
+          type="number"
+          min={1}
+          value={form.maxAttempts}
+          onChange={set('maxAttempts')}
+          placeholder={form.examType === 'OFFICIAL' ? '1' : 'Unlimited'}
+          className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
+        />
+        <p className="text-xs text-slate-500 mt-1">
+          Leave empty for unlimited attempts (recommended for practice exams).
+        </p>
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1.5">Allowed classes</label>
+        {classOptions.length === 0 ? (
+          <p className="text-xs text-slate-500">No classes available. This exam will be open to all students.</p>
+        ) : (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 max-h-48 overflow-y-auto space-y-2">
+            {classOptions.map((cls) => (
+              <label key={cls.id} className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.allowedClassIds.includes(cls.id)}
+                  onChange={() => toggleAllowedClass(cls.id)}
+                  className="accent-sky-600"
+                />
+                <span>{cls.name}</span>
+              </label>
+            ))}
+          </div>
+        )}
+        <p className="text-xs text-slate-500 mt-1">
+          If none selected, all students can join this exam.
+        </p>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -133,6 +204,7 @@ function ExamFormModal({ exam, onClose, onSuccess }) {
 
 export default function ExamManagement() {
   const [exams, setExams] = useState([]);
+  const [classes, setClasses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editExam, setEditExam] = useState(null);
@@ -157,6 +229,10 @@ export default function ExamManagement() {
 
   useEffect(() => {
     load();
+    classApi
+      .getAll()
+      .then((r) => setClasses(r.data?.data || []))
+      .catch(() => setClasses([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load only
   }, []);
 
@@ -249,6 +325,8 @@ export default function ExamManagement() {
                   </th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Type</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Attempts</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Allowed classes</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Duration</th>
                   <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Sections</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">
@@ -284,6 +362,18 @@ export default function ExamManagement() {
                       }`}>
                         {e.examType === 'OFFICIAL' ? 'Official' : 'Practice'}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 align-top whitespace-nowrap">
+                      {e.maxAttempts == null ? 'Unlimited' : e.maxAttempts}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 align-top max-w-[220px]">
+                      {Array.isArray(e.allowedClasses) && e.allowedClasses.length > 0 ? (
+                        <p className="text-xs line-clamp-2">
+                          {e.allowedClasses.map((c) => c.name).join(', ')}
+                        </p>
+                      ) : (
+                        <span className="text-xs text-slate-400">All classes</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-slate-600 align-top whitespace-nowrap">
                       {e.durationMinutes} min
@@ -350,6 +440,7 @@ export default function ExamManagement() {
       >
         <ExamFormModal
           exam={editExam}
+          classOptions={classes}
           onClose={() => setShowForm(false)}
           onSuccess={() => { setShowForm(false); load(); }}
         />

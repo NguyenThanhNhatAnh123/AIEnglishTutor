@@ -196,34 +196,6 @@ function QuestionFormFields({
     }
   };
 
-  const handleImageOcrTts = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setAudioUploading(true);
-    try {
-      const res = await aiApi.imageOcrTts(file);
-      const data = res.data?.data || {};
-      const parsedChoices = (data.choices || []).map((choice, idx) => ({
-        optionText: choice || '',
-        isCorrect: idx === 0,
-      }));
-      setForm((f) => ({
-        ...f,
-        listeningAudioUrl: data.audioUrl || f.listeningAudioUrl,
-        transcript: data.extractedText || f.transcript,
-        questionText: data.questionText || data.extractedText || f.questionText,
-        options: parsedChoices.length >= 2 ? parsedChoices : f.options,
-      }));
-      toast.success('Image OCR + TTS completed.');
-    } catch (err) {
-      const msg = err?.response?.data?.message || err.message || 'Image OCR + TTS failed.';
-      toast.error(msg);
-    } finally {
-      setAudioUploading(false);
-    }
-  };
-
   const audioPreview =
     form.listeningAudioUrl && !form.listeningAudioUrl.startsWith('http')
       ? `${API_ORIGIN}${form.listeningAudioUrl.startsWith('/') ? '' : '/'}${form.listeningAudioUrl}`
@@ -327,7 +299,7 @@ function QuestionFormFields({
         </div>
       </div>
 
-      {(form.questionType === QUESTION_TYPES.LISTENING || form.questionType === QUESTION_TYPES.SPEAKING) && (
+      {form.questionType === QUESTION_TYPES.LISTENING && (
         <div className="space-y-2 rounded-xl border border-slate-200 p-4 bg-slate-50/80">
           <label className="block text-sm font-medium text-slate-700">Audio (required, supports MP3)</label>
           <div className="flex flex-wrap items-center gap-3">
@@ -338,16 +310,12 @@ function QuestionFormFields({
               disabled={audioUploading}
               className="text-sm"
             />
-            <label className="text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white cursor-pointer hover:bg-slate-100">
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/jpg,image/webp"
-                onChange={handleImageOcrTts}
-                disabled={audioUploading}
-                className="hidden"
-              />
-              OCR + TTS from image
-            </label>
+            <Link
+              to="/ocr"
+              className="text-xs px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-100"
+            >
+              Open OCR workspace
+            </Link>
             <Button type="button" variant="ghost" size="sm" onClick={generateTtsFromText} disabled={audioUploading}>
               Generate TTS from question text
             </Button>

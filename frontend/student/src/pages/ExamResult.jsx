@@ -34,8 +34,6 @@ export default function ExamResult() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
     const sid = Number(submissionId);
     Promise.all([

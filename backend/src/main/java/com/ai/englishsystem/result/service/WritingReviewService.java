@@ -33,7 +33,6 @@ public class WritingReviewService {
     private final ScoreRepository scoreRepository;
     private final AiScoringService aiScoringService;
 
-    @Transactional
     public WritingReviewResponse generateDraft(Integer answerId, String customPrompt) {
         Answer answer = loadWritingAnswer(answerId);
         assertTeacherOwnership(answer);
@@ -46,6 +45,7 @@ public class WritingReviewService {
 
         Feedback feedback = feedbackRepository.findByAnswer(answer)
                 .orElseGet(() -> Feedback.builder().answer(answer).build());
+        feedback.setAnswer(answer);
         feedback.setReviewStatus(WritingReviewStatus.DRAFT);
         feedback.setAiFeedback(trimToNull(ai.getFeedback()));
         feedback.setDraftScore(ai.getOverallScore() != null ? clampScore(ai.getOverallScore() * 10f) : null);

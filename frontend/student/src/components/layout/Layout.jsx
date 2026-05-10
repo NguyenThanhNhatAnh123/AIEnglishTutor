@@ -7,7 +7,7 @@ export default function Layout() {
     <div className="min-h-screen bg-transparent">
       <Sidebar />
       <Navbar />
-      <main className="ml-64 pt-16">
+      <main className="md:ml-64 pt-16">
         <div className="p-7">
           <Outlet />
         </div>

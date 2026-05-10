@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import Button from '../common/Button';
-import { speakingApi, API_ORIGIN } from '../../services/api';
 
 /**
- * Record → preview (blob URL) → upload via POST /api/speaking/upload.
+ * Record locally during exam. Upload happens only when student submits the exam.
  *
  * @param {object} props
  * @param {number} props.submissionId
  * @param {number} props.questionId
- * @param {boolean} [props.disabled] When true, recording/upload disabled (e.g. time up).
- * @param {{ speakingAudioUrl?: string, speakingDurationSeconds?: number, speakingFormat?: string }} [props.value]
- * @param {function} props.onChange Called with upload metadata from server (mp3 + duration).
+ * @param {boolean} [props.disabled]
+ * @param {{ speakingAudioUrl?: string, speakingDurationSeconds?: number, speakingFormat?: string, speakingBlob?: Blob|null }} [props.value]
+ * @param {function} props.onChange
  * @param {object} props.toast
  */
 export default function AudioRecorder({
@@ -22,26 +21,21 @@ export default function AudioRecorder({
   toast,
 }) {
   const [recording, setRecording] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState(null);
+  const [localReady, setLocalReady] = useState(false);
   const mediaRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
+  const startedAtRef = useRef(0);
 
-  const serverUrl = value?.speakingAudioUrl;
-  const resolvedServerUrl =
-    serverUrl && !serverUrl.startsWith('http://') && !serverUrl.startsWith('https://') && !serverUrl.startsWith('blob:')
-      ? `${API_ORIGIN}${serverUrl.startsWith('/') ? '' : '/'}${serverUrl}`
-      : serverUrl;
-  const hasServer = typeof serverUrl === 'string' && serverUrl.length > 0 && !serverUrl.startsWith('blob:');
+  const hasServer = typeof value?.speakingAudioUrl === 'string' && value.speakingAudioUrl.length > 0;
+  const hasLocalBlob = value?.speakingBlob instanceof Blob;
 
   useEffect(() => () => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-  }, [previewUrl]);
+  }, []);
 
   const startRecord = async () => {
-    if (disabled) return;
+    if (disabled || submissionId == null || questionId == null) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -57,10 +51,20 @@ export default function AudioRecorder({
         const blob = new Blob(chunksRef.current, { type: mime || 'audio/webm' });
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
-        const url = URL.createObjectURL(blob);
-        setPreviewUrl(url);
+        const elapsedMs = Math.max(0, Date.now() - startedAtRef.current);
+        const seconds = Math.max(1, Math.round(elapsedMs / 1000));
+        setLocalReady(true);
+        onChange?.({
+          speakingBlob: blob,
+          speakingAudioUrl: undefined,
+          speakingDurationSeconds: seconds,
+          speakingFormat: mime || 'webm',
+        });
+        toast.info('Recording saved locally. Audio will upload when you submit the exam.');
       };
       recorder.start();
+      startedAtRef.current = Date.now();
+      setLocalReady(false);
       setRecording(true);
     } catch (e) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -78,37 +82,15 @@ export default function AudioRecorder({
     setRecording(false);
   };
 
-  const discardPreview = () => {
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(null);
+  const clearLocal = () => {
+    setLocalReady(false);
+    onChange?.({
+      speakingBlob: null,
+      speakingAudioUrl: undefined,
+      speakingDurationSeconds: undefined,
+      speakingFormat: undefined,
+    });
   };
-
-  const uploadPreview = async () => {
-    if (!previewUrl || disabled) return;
-    setUploading(true);
-    try {
-      const blob = await fetch(previewUrl).then((r) => r.blob());
-      const res = await speakingApi.upload(blob, submissionId, questionId);
-      const payload = res.data?.data;
-      if (payload?.url) {
-        onChange?.({
-          speakingAudioUrl: payload.url,
-          speakingDurationSeconds: payload.durationSeconds,
-          speakingFormat: payload.format,
-        });
-        discardPreview();
-        toast.success('Recording uploaded.');
-      } else {
-        toast.error('Upload succeeded but no URL returned.');
-      }
-    } catch (e) {
-      toast.error(e?.response?.data?.message || 'Upload failed. Please try again.');
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const listenSrc = previewUrl || (hasServer ? resolvedServerUrl : null);
 
   return (
     <div className="flex flex-col items-center gap-4 py-6">
@@ -116,13 +98,13 @@ export default function AudioRecorder({
         className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${
           recording
             ? 'bg-red-100 animate-pulse dark:bg-red-950/50'
-            : uploading
-              ? 'bg-amber-50 dark:bg-amber-950/50'
+            : (localReady || hasLocalBlob)
+              ? 'bg-emerald-50 dark:bg-emerald-950/50'
               : 'bg-blue-50 dark:bg-slate-800'
         }`}
       >
         <svg
-          className={`w-8 h-8 ${recording ? 'text-red-500' : uploading ? 'text-amber-500' : 'text-blue-400'}`}
+          className={`w-8 h-8 ${recording ? 'text-red-500' : (localReady || hasLocalBlob) ? 'text-emerald-500' : 'text-blue-400'}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -140,46 +122,37 @@ export default function AudioRecorder({
         {disabled
           ? 'Recording disabled — exam time has ended.'
           : recording
-            ? 'Recording… speak clearly.'
-            : uploading
-              ? 'Uploading…'
-              : previewUrl
-                ? 'Preview your recording, then upload or re-record.'
-                : hasServer
-                  ? 'Recording saved. You can re-record if needed.'
-                  : 'Press start to record your answer.'}
+            ? 'Recording... speak clearly.'
+            : (localReady || hasLocalBlob)
+              ? 'Recording saved locally. It will upload when you submit the exam.'
+              : hasServer
+                ? 'A previous recording exists. Re-record to replace it before submit.'
+                : 'Press start to record your answer.'}
       </p>
 
       <div className="flex flex-wrap gap-2 justify-center">
         {recording ? (
-          <Button variant="danger" onClick={stopRecord} disabled={uploading || disabled}>
+          <Button variant="danger" onClick={stopRecord} disabled={disabled}>
             Stop
           </Button>
         ) : (
-          <Button variant="primary" onClick={startRecord} disabled={uploading || disabled}>
-            {previewUrl || hasServer ? 'Re-record' : 'Start recording'}
+          <Button variant="primary" onClick={startRecord} disabled={disabled}>
+            {(localReady || hasLocalBlob || hasServer) ? 'Re-record' : 'Start recording'}
           </Button>
         )}
-        {previewUrl && !recording && (
-          <>
-            <Button variant="secondary" onClick={discardPreview} disabled={uploading || disabled}>
-              Discard
-            </Button>
-            <Button variant="primary" onClick={uploadPreview} disabled={uploading || disabled}>
-              {uploading ? 'Uploading…' : 'Upload recording'}
-            </Button>
-          </>
+        {(localReady || hasLocalBlob) && !recording && (
+          <Button variant="secondary" onClick={clearLocal} disabled={disabled}>
+            Clear recording
+          </Button>
         )}
       </div>
 
-      {hasServer && value?.speakingDurationSeconds != null && (
+      {(hasLocalBlob || hasServer) && value?.speakingDurationSeconds != null && (
         <p className="text-xs text-slate-500">
-          Saved MP3: {value.speakingDurationSeconds}s · {value.speakingFormat || 'mp3'}
+          Duration: {value.speakingDurationSeconds}s · {value.speakingFormat || 'audio'}
         </p>
       )}
-      {listenSrc && !recording && (
-        <audio controls src={listenSrc} className="w-full max-w-xs mt-2" preload="metadata" />
-      )}
+      {/* Student cannot replay speaking recordings during the exam. */}
     </div>
   );
 }

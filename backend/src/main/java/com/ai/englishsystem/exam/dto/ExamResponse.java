@@ -24,6 +24,8 @@ public class ExamResponse {
 
     /** OFFICIAL or PRACTICE */
     private String examType;
+    /** Null means unlimited attempts. */
+    private Integer maxAttempts;
 
     private LocalDateTime createdAt;
     /** Populated in list responses when sections are eager-fetched (e.g. teacher's exams). */
@@ -32,5 +34,8 @@ public class ExamResponse {
     /** Teacher portal: false when this exam is ACTIVE but owned by another teacher (view-only). */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private Boolean canManage;
+    /** Empty means unrestricted access by class. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<ExamAllowedClassResponse> allowedClasses;
     private List<ExamSectionResponse> sections;
 }

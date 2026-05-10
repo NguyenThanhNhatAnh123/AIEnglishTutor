@@ -11,6 +11,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -35,5 +37,18 @@ class MediaControllerSecurityTest {
 
         mockMvc.perform(multipart("/api/media/upload").file(file))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void anonymousUserCannotAccessSpeakingUploads() throws Exception {
+        mockMvc.perform(get("/uploads/audio/speaking/private-answer.mp3"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void anonymousUserCanAccessPublicListeningUploads() throws Exception {
+        mockMvc.perform(get("/uploads/audio/listening/public-prompt.mp3"))
+                .andExpect(status().isNotFound())
+                .andExpect(header().doesNotExist("WWW-Authenticate"));
     }
 }

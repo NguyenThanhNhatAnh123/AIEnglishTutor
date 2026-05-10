@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
 import Modal from '../components/common/Modal';
+import ConfirmDialog from '../components/common/ConfirmDialog';
 import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import AudioPlayer from '../../../packages/ui/AudioPlayer.jsx';
@@ -38,6 +39,13 @@ function writingAnswers(list) {
   return (list || []).filter((a) => {
     const t = (a.questionType || '').toUpperCase();
     return t === 'WRITING' && typeof a.answerText === 'string' && a.answerText.trim().length > 0;
+  });
+}
+
+function objectiveAnswers(list) {
+  return (list || []).filter((a) => {
+    const t = (a.questionType || '').toUpperCase();
+    return t === 'MULTIPLE_CHOICE' || t === 'LISTENING';
   });
 }
 
@@ -95,6 +103,9 @@ function ScoreDetailModal({ submission, onClose }) {
   const [speakingCustomPromptByAnswer, setSpeakingCustomPromptByAnswer] = useState({});
   const [speakingDraftByAnswer, setSpeakingDraftByAnswer] = useState({});
   const toast = useToast();
+
+  // Confirm dialog state (replaces window.confirm)
+  const [confirmState, setConfirmState] = useState({ isOpen: false, title: '', message: '', onConfirm: null, variant: 'primary' });
 
   useEffect(() => {
     let cancelled = false;
@@ -289,34 +300,50 @@ function ScoreDetailModal({ submission, onClose }) {
 
   const revertSpeakingReview = async (answer) => {
     if (!answer?.id) return;
-    if (!window.confirm('Move this speaking review back to draft? Students will no longer see the published score.')) return;
-    try {
-      setSpeakingRevertingAnswerId(answer.id);
-      const res = await speakingReviewApi.revertDraft(answer.id);
-      mergeSpeakingReview(answer.id, res.data?.data);
-      toast.success('Speaking review set to draft.');
-      await refreshScore();
-    } catch (err) {
-      toast.error(err?.response?.data?.message || 'Revert speaking review failed.');
-    } finally {
-      setSpeakingRevertingAnswerId(null);
-    }
+    setConfirmState({
+      isOpen: true,
+      title: 'Revert Speaking Review',
+      message: 'Move this speaking review back to draft? Students will no longer see the published score.',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmState((s) => ({ ...s, isOpen: false }));
+        try {
+          setSpeakingRevertingAnswerId(answer.id);
+          const res = await speakingReviewApi.revertDraft(answer.id);
+          mergeSpeakingReview(answer.id, res.data?.data);
+          toast.success('Speaking review set to draft.');
+          await refreshScore();
+        } catch (err) {
+          toast.error(err?.response?.data?.message || 'Revert speaking review failed.');
+        } finally {
+          setSpeakingRevertingAnswerId(null);
+        }
+      },
+    });
   };
 
   const revertWritingReview = async (answer) => {
     if (!answer?.id) return;
-    if (!window.confirm('Move this writing review back to draft? Students will no longer see the published score.')) return;
-    try {
-      setWritingRevertingAnswerId(answer.id);
-      const res = await writingReviewApi.revertDraft(answer.id);
-      mergeWritingReview(answer.id, res.data?.data);
-      toast.success('Writing review set to draft.');
-      await refreshScore();
-    } catch (err) {
-      toast.error(err?.response?.data?.message || 'Revert writing review failed.');
-    } finally {
-      setWritingRevertingAnswerId(null);
-    }
+    setConfirmState({
+      isOpen: true,
+      title: 'Revert Writing Review',
+      message: 'Move this writing review back to draft? Students will no longer see the published score.',
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmState((s) => ({ ...s, isOpen: false }));
+        try {
+          setWritingRevertingAnswerId(answer.id);
+          const res = await writingReviewApi.revertDraft(answer.id);
+          mergeWritingReview(answer.id, res.data?.data);
+          toast.success('Writing review set to draft.');
+          await refreshScore();
+        } catch (err) {
+          toast.error(err?.response?.data?.message || 'Revert writing review failed.');
+        } finally {
+          setWritingRevertingAnswerId(null);
+        }
+      },
+    });
   };
 
   return (
@@ -355,6 +382,24 @@ function ScoreDetailModal({ submission, onClose }) {
               {generatingAllReviews ? 'Generating...' : 'Generate AI Reviews (Writing+Speaking)'}
             </button>
           </div>
+          {objectiveAnswers(answers).length > 0 && (
+            <div className="rounded-xl border border-slate-100 p-4 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Objective Answers</p>
+              {objectiveAnswers(answers).map((a) => (
+                <div key={a.id} className="border-b border-slate-100 pb-4 last:border-0 space-y-2">
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Question</p>
+                  <p className="text-xs text-slate-500">Type: {a.questionType || 'N/A'} · ID #{a.questionId}</p>
+                  <p className="text-sm text-slate-800 whitespace-pre-wrap">{a.questionText || '—'}</p>
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Student answer</p>
+                  <p className="text-xs text-slate-700 border border-slate-100 rounded-lg p-2 bg-white">
+                    {a.selectedOptionText
+                      || (a.selectedOptionId != null ? `Option #${a.selectedOptionId}` : null)
+                      || (a.answerText && a.answerText.trim().length > 0 ? a.answerText : 'No answer')}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
           {speakingAnswers(answers).length > 0 && (
             <div className="rounded-xl border border-slate-100 p-4 space-y-3">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Speaking</p>
@@ -665,6 +710,16 @@ function ScoreDetailModal({ submission, onClose }) {
           )}
         </div>
       )}
+      {/* Revert confirmation dialog (replaces window.confirm) */}
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        title={confirmState.title}
+        message={confirmState.message}
+        confirmLabel="Revert"
+        variant={confirmState.variant}
+        onConfirm={confirmState.onConfirm || (() => {})}
+        onCancel={() => setConfirmState((s) => ({ ...s, isOpen: false }))}
+      />
     </Modal>
   );
 }
@@ -680,6 +735,10 @@ export default function StudentResults() {
   const [minScore, setMinScore] = useState('');
   const [maxScore, setMaxScore] = useState('');
   const [minSpeakingSec, setMinSpeakingSec] = useState('');
+  const toast = useToast();
+
+  // Replaces window.confirm for delete submission
+  const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, submissionId: null });
 
   useEffect(() => {
     examApi.getAll()
@@ -738,17 +797,23 @@ export default function StudentResults() {
     return () => { cancelled = true; };
   }, [submissions]);
 
-  const filtered = submissions.filter((s) => {
-    const name = (s.studentName || `Student #${s.studentId}`).toLowerCase();
-    if (!name.includes(search.toLowerCase())) return false;
-    if (minScore !== '' && (s.totalScore == null || Number(s.totalScore) < Number(minScore))) return false;
-    if (maxScore !== '' && (s.totalScore == null || Number(s.totalScore) > Number(maxScore))) return false;
-    if (minSpeakingSec !== '') {
-      const sp = totalSpeakingSeconds(answerMap[s.id]);
-      if (sp < Number(minSpeakingSec)) return false;
-    }
-    return true;
-  });
+  const filtered = submissions
+    .filter((s) => {
+      const name = (s.studentName || `Student #${s.studentId}`).toLowerCase();
+      if (!name.includes(search.toLowerCase())) return false;
+      if (minScore !== '' && (s.totalScore == null || Number(s.totalScore) < Number(minScore))) return false;
+      if (maxScore !== '' && (s.totalScore == null || Number(s.totalScore) > Number(maxScore))) return false;
+      if (minSpeakingSec !== '') {
+        const sp = totalSpeakingSeconds(answerMap[s.id]);
+        if (sp < Number(minSpeakingSec)) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const aTime = new Date(a.endTime || a.submitTime || a.startTime || 0).getTime();
+      const bTime = new Date(b.endTime || b.submitTime || b.startTime || 0).getTime();
+      return bTime - aTime;
+    });
 
   const selectedExamTitle = exams.find((e) => String(e.id) === String(selectedExamId))?.title || '';
 
@@ -878,20 +943,7 @@ export default function StudentResults() {
                         variant="ghost"
                         size="sm"
                         className="text-red-600"
-                        onClick={async () => {
-                          if (!window.confirm('Delete this submission and remove all speaking files from the server?')) return;
-                          try {
-                            await submissionApi.delete(s.id);
-                            setSubmissions((prev) => prev.filter((x) => x.id !== s.id));
-                            setAnswerMap((prev) => {
-                              const next = { ...prev };
-                              delete next[s.id];
-                              return next;
-                            });
-                          } catch {
-                            alert('Delete failed.');
-                          }
-                        }}
+                        onClick={() => setDeleteConfirm({ isOpen: true, submissionId: s.id })}
                       >
                         Delete
                       </Button>
@@ -906,6 +958,31 @@ export default function StudentResults() {
       </div>
 
       {selectedSub && <ScoreDetailModal submission={selectedSub} onClose={() => setSelectedSub(null)} />}
+      {/* Delete submission confirmation */}
+      <ConfirmDialog
+        isOpen={deleteConfirm.isOpen}
+        title="Delete Submission"
+        message="Delete this submission and remove all speaking files from the server?"
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={async () => {
+          const sid = deleteConfirm.submissionId;
+          setDeleteConfirm({ isOpen: false, submissionId: null });
+          if (!sid) return;
+          try {
+            await submissionApi.delete(sid);
+            setSubmissions((prev) => prev.filter((x) => x.id !== sid));
+            setAnswerMap((prev) => {
+              const next = { ...prev };
+              delete next[sid];
+              return next;
+            });
+          } catch {
+            toast.error('Delete failed.');
+          }
+        }}
+        onCancel={() => setDeleteConfirm({ isOpen: false, submissionId: null })}
+      />
     </Layout>
   );
 }

@@ -36,7 +36,6 @@ public class SpeakingReviewService {
     private final AiScoringService aiScoringService;
     private final SpeakingFileStorage speakingFileStorage;
 
-    @Transactional
     public SpeakingReviewResponse generateDraft(Integer answerId, String customPrompt, String language) {
         Answer answer = loadSpeakingAnswer(answerId);
         assertTeacherOwnership(answer);
@@ -65,6 +64,7 @@ public class SpeakingReviewService {
 
         Feedback feedback = feedbackRepository.findByAnswer(answer)
                 .orElseGet(() -> Feedback.builder().answer(answer).build());
+        feedback.setAnswer(answer);
         feedback.setReviewStatus(WritingReviewStatus.DRAFT);
         feedback.setAiFeedback(ai != null ? trimToNull(ai.getFeedback()) : null);
         feedback.setDraftScore(ai != null && ai.getOverallScore() != null ? clampScore(ai.getOverallScore() * 10f) : null);

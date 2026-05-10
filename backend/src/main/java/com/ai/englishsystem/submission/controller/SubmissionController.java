@@ -90,6 +90,14 @@ public class SubmissionController {
         return ResponseEntity.ok(ApiResponse.success(list));
     }
 
+    // POST /api/submissions/start and POST /api/submissions/submit are deprecated.
+    // Students must use /api/student/submissions/{id}/submit (StudentExamController).
+    // Kept only for backward compatibility; will be removed in a future release.
+
+    /**
+     * @deprecated Use POST /api/student/submissions/{submissionId}/submit instead.
+     */
+    @Deprecated
     @PostMapping("/start")
     @PreAuthorize("hasRole('STUDENT')")
     public ResponseEntity<ApiResponse<SubmissionResponse>> start(@Valid @RequestBody StartSubmissionRequest request) {
@@ -97,6 +105,10 @@ public class SubmissionController {
         return ResponseEntity.ok(ApiResponse.success("Exam started", response));
     }
 
+    /**
+     * @deprecated Use POST /api/student/submissions/{submissionId}/submit instead.
+     */
+    @Deprecated
     @PostMapping("/submit")
     @PreAuthorize("hasRole('STUDENT')")
     public ResponseEntity<ApiResponse<SubmissionResponse>> submit(@Valid @RequestBody SubmitSubmissionRequest request) {

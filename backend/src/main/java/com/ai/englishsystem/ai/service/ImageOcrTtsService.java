@@ -77,10 +77,21 @@ public class ImageOcrTtsService {
     @Value("${app.ocr.external.language:eng}")
     private String ocrSpaceLanguage;
 
+    /** Shared, reusable HttpClient instance (created once, reused across calls). */
+    private volatile HttpClient httpClient;
+
     private HttpClient httpClient() {
-        return HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(Math.max(1, httpConnectTimeoutSeconds)))
-                .build();
+        if (httpClient == null) {
+            synchronized (this) {
+                if (httpClient == null) {
+                    httpClient = HttpClient.newBuilder()
+                            .connectTimeout(Duration.ofSeconds(Math.max(1, httpConnectTimeoutSeconds)))
+                            .build();
+                    log.info("HttpClient initialized for ImageOcrTtsService (connectTimeout={}s)", httpConnectTimeoutSeconds);
+                }
+            }
+        }
+        return httpClient;
     }
 
     private String resolveOcrBaseUrl() {
@@ -144,10 +155,14 @@ public class ImageOcrTtsService {
             }
             OcrParsed parsed = parseQuestionAndChoices(extractedText);
 
-            synthesizeTextToMp3ViaLocalApi(parsed.questionText(), mp3Path);
-
             String imageUrl = "/uploads/audio/images/" + imagePath.getFileName();
-            String audioUrl = "/uploads/audio/tts/" + mp3Path.getFileName();
+            String audioUrl = null;
+            try {
+                synthesizeTextToMp3ViaLocalApi(parsed.questionText(), mp3Path);
+                audioUrl = "/uploads/audio/tts/" + mp3Path.getFileName();
+            } catch (Exception ttsError) {
+                log.warn("OCR succeeded but TTS failed: {}", ttsError.getMessage());
+            }
 
             log.info("Image OCR+TTS completed: image={}, audio={}", imageUrl, audioUrl);
             return ImageOcrTtsResponse.builder()
@@ -277,7 +292,11 @@ public class ImageOcrTtsService {
 
     private static void assertValidImageMagic(Path file, String contentType) {
         try {
-            byte[] head = Files.readAllBytes(file);
+            // Only read header bytes for magic check — not the entire file (Bug #7 fix)
+            byte[] head;
+            try (var in = Files.newInputStream(file)) {
+                head = in.readNBytes(12); // PNG/JPEG/WEBP headers are all ≤12 bytes
+            }
             if (head.length < 12) {
                 throw new BadRequestException("Image file is too small");
             }
@@ -308,12 +327,12 @@ public class ImageOcrTtsService {
                 && b[7] == 0x0A;
     }
 
+    /** Check JPEG SOI marker (FF D8). Does NOT check EOI (FF D9) at end
+     *  because many valid JPEGs have trailing metadata after the EOI marker. (Bug #7 fix) */
     private static boolean isJpeg(byte[] b) {
-        return b.length > 4
+        return b.length >= 2
                 && (b[0] & 0xFF) == 0xFF
-                && (b[1] & 0xFF) == 0xD8
-                && (b[b.length - 2] & 0xFF) == 0xFF
-                && (b[b.length - 1] & 0xFF) == 0xD9;
+                && (b[1] & 0xFF) == 0xD8;
     }
 
     private static boolean isWebp(byte[] b) {

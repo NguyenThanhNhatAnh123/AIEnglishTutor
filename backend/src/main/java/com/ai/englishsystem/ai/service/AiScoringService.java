@@ -20,7 +20,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -87,12 +86,27 @@ public class AiScoringService {
     @Value("${app.ai.http.request-timeout-seconds:120}")
     private int httpRequestTimeoutSeconds;
 
-    @Transactional
+    /** Shared, reusable HttpClient instance (created once, reused across calls). */
+    private volatile HttpClient sharedHttpClient;
+
+    private HttpClient httpClient() {
+        if (sharedHttpClient == null) {
+            synchronized (this) {
+                if (sharedHttpClient == null) {
+                    sharedHttpClient = HttpClient.newBuilder()
+                            .connectTimeout(Duration.ofSeconds(Math.max(1, httpConnectTimeoutSeconds)))
+                            .build();
+                    log.info("HttpClient initialized for AiScoringService (connectTimeout={}s)", httpConnectTimeoutSeconds);
+                }
+            }
+        }
+        return sharedHttpClient;
+    }
+
     public AiScoreResponse scoreWriting(WritingScoreRequest request) {
         return scoreWriting(request, false);
     }
 
-    @Transactional
     public AiScoreResponse scoreWriting(WritingScoreRequest request, boolean forceRescore) {
         Answer answer = answerRepository.findWithSubmissionGraphById(request.getAnswerId())
                 .orElseThrow(() -> new NotFoundException("Answer", request.getAnswerId()));
@@ -152,12 +166,10 @@ public class AiScoringService {
         return toAiScoreResponse(aiResult);
     }
 
-    @Transactional
     public AiScoreResponse scoreSpeaking(SpeakingScoreRequest request) {
         return scoreSpeaking(request, false);
     }
 
-    @Transactional
     public AiScoreResponse scoreSpeaking(SpeakingScoreRequest request, boolean forceRescore) {
         Answer answer = answerRepository.findWithSubmissionGraphById(request.getAnswerId())
                 .orElseThrow(() -> new NotFoundException("Answer", request.getAnswerId()));
@@ -222,7 +234,6 @@ public class AiScoringService {
         return toAiScoreResponse(aiResult);
     }
 
-    @Transactional(readOnly = true)
     public String transcribeSpeakingAudio(Path audioPath, String language) {
         if (audioPath == null || !Files.exists(audioPath)) {
             throw new BadRequestException("Speaking audio file not found for transcription");
@@ -322,9 +333,7 @@ public class AiScoringService {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
-        HttpResponse<String> response = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(Math.max(1, httpConnectTimeoutSeconds)))
-                .build()
+        HttpResponse<String> response = httpClient()
                 .send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -444,13 +453,14 @@ public class AiScoringService {
                 .uri(URI.create(endpoint))
                 .header("Authorization", "Bearer " + deepSeekApiKey)
                 .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build();
 
         Instant startedAt = Instant.now();
         HttpResponse<String> response = null;
         try {
-            response = HttpClient.newHttpClient()
+            response = httpClient()
                     .send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
@@ -662,10 +672,11 @@ public class AiScoringService {
                     .uri(URI.create(endpoint))
                     .header("Authorization", "Bearer " + deepSeekApiKey)
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                     .build();
 
-            HttpResponse<String> response = HttpClient.newHttpClient()
+            HttpResponse<String> response = httpClient()
                     .send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 lastError = "endpoint " + endpoint + " -> HTTP " + response.statusCode();
@@ -706,10 +717,11 @@ public class AiScoringService {
                 .uri(URI.create(endpoint))
                 .header("Authorization", "Bearer " + whisperApiKey)
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
-        HttpResponse<String> response = HttpClient.newHttpClient()
+        HttpResponse<String> response = httpClient()
                 .send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new IllegalStateException("Whisper API error: HTTP " + response.statusCode());

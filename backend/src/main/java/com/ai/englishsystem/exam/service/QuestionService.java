@@ -246,7 +246,10 @@ public class QuestionService {
         } else if ("WRITING".equals(qType)) {
             validateWriting(request);
         } else if ("SPEAKING".equals(qType)) {
-            validateAudioRequired(request, "SPEAKING");
+            // Speaking prompt audio is optional.
+            if (request.getListeningAudioUrl() != null && request.getListeningAudioUrl().isBlank()) {
+                throw new BadRequestException("If provided, listeningAudioUrl cannot be blank");
+            }
         } else {
             throw new BadRequestException("Unsupported questionType: " + qType);
         }

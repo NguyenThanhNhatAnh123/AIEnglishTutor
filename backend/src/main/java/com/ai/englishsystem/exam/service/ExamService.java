@@ -24,6 +24,8 @@ import com.ai.englishsystem.exam.repository.ExamAttemptRepository;
 import com.ai.englishsystem.result.repository.FeedbackRepository;
 import com.ai.englishsystem.result.repository.ScoreRepository;
 import com.ai.englishsystem.ai.repository.AiResultRepository;
+import com.ai.englishsystem.classmodule.entity.ClassEntity;
+import com.ai.englishsystem.classmodule.repository.ClassRepository;
 import com.ai.englishsystem.speaking.service.SpeakingFileStorage;
 import com.ai.englishsystem.teacher.entity.Teacher;
 import com.ai.englishsystem.teacher.repository.TeacherRepository;
@@ -31,6 +33,7 @@ import com.ai.englishsystem.submission.entity.Answer;
 import com.ai.englishsystem.submission.entity.Submission;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
 import com.ai.englishsystem.submission.repository.SubmissionRepository;
+import com.ai.englishsystem.submission.repository.SubmissionSuspiciousEventRepository;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -39,8 +42,11 @@ import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -58,7 +64,9 @@ public class ExamService {
     private final AiResultRepository aiResultRepository;
     private final FeedbackRepository feedbackRepository;
     private final ExamAttemptRepository examAttemptRepository;
+    private final SubmissionSuspiciousEventRepository submissionSuspiciousEventRepository;
     private final SpeakingFileStorage speakingFileStorage;
+    private final ClassRepository classRepository;
 
     // ─── READ ────────────────────────────────────────────────────────────────
 
@@ -70,6 +78,7 @@ public class ExamService {
     public List<ExamResponse> findAll() {
         if (SecurityUtils.hasRole("ADMIN")) {
             List<Exam> exams = examRepository.findAll();
+            initializeListResponseAssociations(exams);
             return exams.stream()
                     .sorted(byCreatedDesc())
                     .map(this::toResponse)
@@ -78,6 +87,7 @@ public class ExamService {
         if (SecurityUtils.hasRole("TEACHER")) {
             Teacher teacher = resolveCurrentTeacher();
             List<Exam> exams = examRepository.findActiveOrOwnedByTeacher("ACTIVE", teacher);
+            initializeListResponseAssociations(exams);
             Integer myTeacherId = teacher.getId();
             return exams.stream()
                     .sorted(byCreatedDesc())
@@ -126,14 +136,17 @@ public class ExamService {
             teacher = resolveCurrentTeacher();
         }
 
+        ExamType examType = parseExamType(request.getExamType());
         Exam exam = Exam.builder()
                 .title(request.getTitle())
                 .description(request.getDescription())
                 .teacher(teacher)
                 .durationMinutes(request.getDurationMinutes() != null ? request.getDurationMinutes() : 60)
                 .status(request.getStatus() != null ? request.getStatus() : "DRAFT")
-                .examType(parseExamType(request.getExamType()))
+                .examType(examType)
+                .maxAttempts(resolveMaxAttempts(examType, request.getMaxAttempts()))
                 .build();
+        exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds()));
 
         exam = examRepository.save(exam);
 
@@ -161,6 +174,12 @@ public class ExamService {
         }
         if (request.getExamType() != null && !request.getExamType().isBlank()) {
             exam.setExamType(parseExamType(request.getExamType()));
+        }
+        if (request.getMaxAttempts() != null || (request.getExamType() != null && !request.getExamType().isBlank())) {
+            exam.setMaxAttempts(resolveMaxAttempts(exam.getExamType(), request.getMaxAttempts()));
+        }
+        if (request.getAllowedClassIds() != null) {
+            exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds()));
         }
 
         exam = examRepository.save(exam);
@@ -191,6 +210,12 @@ public class ExamService {
         if (request.getExamType() != null && !request.getExamType().isBlank()) {
             exam.setExamType(parseExamType(request.getExamType()));
         }
+        if (request.getMaxAttempts() != null) {
+            exam.setMaxAttempts(resolveMaxAttempts(exam.getExamType(), request.getMaxAttempts()));
+        }
+        if (request.getAllowedClassIds() != null) {
+            exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds()));
+        }
 
         exam = examRepository.save(exam);
         return toResponseWithSections(exam);
@@ -216,6 +241,8 @@ public class ExamService {
             }
         }
         if (!submissions.isEmpty()) {
+            // Delete FK-dependent child rows before submissions
+            submissionSuspiciousEventRepository.deleteBySubmissionIn(submissions);
             scoreRepository.deleteBySubmissionIn(submissions);
             submissionRepository.deleteByExam(exam);
         }
@@ -364,6 +391,47 @@ public class ExamService {
         }
     }
 
+    private Integer resolveMaxAttempts(ExamType examType, Integer requestedMaxAttempts) {
+        if (requestedMaxAttempts != null && requestedMaxAttempts < 1) {
+            throw new BadRequestException("maxAttempts must be at least 1 when provided");
+        }
+        if (requestedMaxAttempts != null) {
+            return requestedMaxAttempts;
+        }
+        if (examType == ExamType.OFFICIAL) {
+            return 1;
+        }
+        return null;
+    }
+
+    private List<ClassEntity> resolveAllowedClassesForWrite(List<Integer> allowedClassIds) {
+        if (allowedClassIds == null) {
+            return new ArrayList<>();
+        }
+        if (allowedClassIds.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        Set<Integer> dedupedIds = new LinkedHashSet<>(allowedClassIds);
+        List<ClassEntity> classes = classRepository.findAllById(dedupedIds);
+        if (classes.size() != dedupedIds.size()) {
+            throw new BadRequestException("One or more allowedClassIds do not exist");
+        }
+
+        if (SecurityUtils.hasRole("TEACHER")) {
+            Integer teacherUserId = SecurityUtils.getCurrentUserId();
+            boolean invalidOwnership = classes.stream()
+                    .anyMatch(c -> c.getTeacher() == null
+                            || c.getTeacher().getUser() == null
+                            || !teacherUserId.equals(c.getTeacher().getUser().getId()));
+            if (invalidOwnership) {
+                throw new ForbiddenException("You can only assign classes that you own");
+            }
+        }
+
+        return new ArrayList<>(classes);
+    }
+
     private void assertOwnerOrAdmin(Exam exam) {
         if (SecurityUtils.hasRole("ADMIN")) {
             return;
@@ -400,9 +468,19 @@ public class ExamService {
                 .durationMinutes(exam.getDurationMinutes())
                 .status(exam.getStatus())
                 .examType(exam.getExamType() != null ? exam.getExamType().name() : ExamType.PRACTICE.name())
+                .maxAttempts(exam.getMaxAttempts())
                 .createdAt(exam.getCreatedAt());
         if (Hibernate.isInitialized(exam.getSections())) {
             b.sectionCount(exam.getSections() != null ? exam.getSections().size() : 0);
+        }
+        if (Hibernate.isInitialized(exam.getAllowedClasses())) {
+            b.allowedClasses(exam.getAllowedClasses().stream()
+                    .sorted(Comparator.comparing(ClassEntity::getName, Comparator.nullsLast(String::compareToIgnoreCase)))
+                    .map(c -> com.ai.englishsystem.exam.dto.ExamAllowedClassResponse.builder()
+                            .id(c.getId())
+                            .name(c.getName())
+                            .build())
+                    .collect(Collectors.toList()));
         }
         if (canManage != null) {
             b.canManage(canManage);
@@ -411,6 +489,7 @@ public class ExamService {
     }
 
     private ExamResponse toResponseWithSections(Exam exam) {
+        initializeDetailAssociations(exam);
         ExamResponse response = toResponse(exam);
         List<ExamSectionResponse> sections = exam.getSections().stream()
                 .sorted((a, b) -> Integer.compare(
@@ -464,5 +543,23 @@ public class ExamService {
                 .orderIndex(s.getOrderIndex())
                 .questionCount(s.getQuestions() != null ? s.getQuestions().size() : 0)
                 .build();
+    }
+
+    private void initializeListResponseAssociations(List<Exam> exams) {
+        exams.forEach(exam -> {
+            Hibernate.initialize(exam.getSections());
+            Hibernate.initialize(exam.getAllowedClasses());
+        });
+    }
+
+    private void initializeDetailAssociations(Exam exam) {
+        Hibernate.initialize(exam.getAllowedClasses());
+        Hibernate.initialize(exam.getSections());
+        for (ExamSection section : exam.getSections()) {
+            Hibernate.initialize(section.getQuestions());
+            for (var question : section.getQuestions()) {
+                Hibernate.initialize(question.getOptions());
+            }
+        }
     }
 }

@@ -21,6 +21,8 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const syncTime = useCallback(() => {
     const el = audioRef.current;
@@ -40,6 +42,16 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
       setPlaying(false);
       setCurrent(0);
     };
+    const onLoadStart = () => {
+      setLoadError('');
+      setLoading(true);
+    };
+    const onCanPlay = () => setLoading(false);
+    const onError = () => {
+      setLoading(false);
+      setPlaying(false);
+      setLoadError('Cannot load this audio file.');
+    };
     const onTime = () => syncTime();
     const onLoaded = () => {
       if (el.duration && Number.isFinite(el.duration)) setDuration(el.duration);
@@ -48,6 +60,9 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
     el.addEventListener('play', onPlay);
     el.addEventListener('pause', onPause);
     el.addEventListener('ended', onEnded);
+    el.addEventListener('loadstart', onLoadStart);
+    el.addEventListener('canplay', onCanPlay);
+    el.addEventListener('error', onError);
     el.addEventListener('timeupdate', onTime);
     el.addEventListener('loadedmetadata', onLoaded);
     el.addEventListener('durationchange', onLoaded);
@@ -55,6 +70,9 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
       el.removeEventListener('play', onPlay);
       el.removeEventListener('pause', onPause);
       el.removeEventListener('ended', onEnded);
+      el.removeEventListener('loadstart', onLoadStart);
+      el.removeEventListener('canplay', onCanPlay);
+      el.removeEventListener('error', onError);
       el.removeEventListener('timeupdate', onTime);
       el.removeEventListener('loadedmetadata', onLoaded);
       el.removeEventListener('durationchange', onLoaded);
@@ -75,6 +93,8 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
     setCurrent(0);
     setDuration(0);
     setPlaying(false);
+    setLoading(false);
+    setLoadError('');
   }, [src]);
 
   if (!src) return null;
@@ -107,7 +127,7 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
         <button
           type="button"
           onClick={toggle}
-          disabled={disabled}
+          disabled={disabled || !!loadError}
           className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           aria-label={playing ? 'Pause audio' : 'Play audio'}
         >
@@ -156,6 +176,8 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
           </div>
         </div>
       </div>
+      {loading && <span className="text-xs text-slate-500 dark:text-slate-400">Loading audio...</span>}
+      {loadError && <span className="text-xs text-rose-600">{loadError}</span>}
       {disabled && (
         <span className="text-xs text-slate-500 dark:text-slate-400">Unavailable (exam ended)</span>
       )}

@@ -23,7 +23,8 @@ export default function ExamList() {
         toast.error(msg);
       })
       .finally(() => setLoading(false));
-  }, [toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = exams.filter((e) =>
     e.title?.toLowerCase().includes(search.toLowerCase())

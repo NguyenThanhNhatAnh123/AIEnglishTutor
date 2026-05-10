@@ -14,21 +14,21 @@ public interface ExamRepository extends JpaRepository<Exam, Integer> {
     List<Exam> findByTeacher(Teacher teacher);
     List<Exam> findByStatus(String status);
 
-    @EntityGraph(attributePaths = {"teacher", "teacher.user", "sections"})
+    @EntityGraph(attributePaths = {"teacher", "teacher.user"})
     @Override
     List<Exam> findAll();
 
-    @EntityGraph(attributePaths = {"teacher", "teacher.user", "sections", "sections.questions", "sections.questions.options"})
+    @EntityGraph(attributePaths = {"teacher", "teacher.user"})
     @Override
     Optional<Exam> findById(Integer id);
 
     /** Active exams for students — eager load teacher for display */
-    @EntityGraph(attributePaths = {"teacher", "teacher.user"})
+    @EntityGraph(attributePaths = {"teacher", "teacher.user", "allowedClasses"})
     @Query("SELECT e FROM Exam e WHERE e.status = :status")
     List<Exam> findByStatusWithTeacher(@Param("status") String status);
 
     /** Teacher's own exams — sections for sectionCount in list (questions not loaded). */
-    @EntityGraph(attributePaths = {"teacher", "teacher.user", "sections"})
+    @EntityGraph(attributePaths = {"teacher", "teacher.user"})
     @Query("SELECT e FROM Exam e WHERE e.teacher = :teacher")
     List<Exam> findByTeacherWithUser(@Param("teacher") Teacher teacher);
 
@@ -36,7 +36,7 @@ public interface ExamRepository extends JpaRepository<Exam, Integer> {
      * Same visibility as students for ACTIVE exams, plus this teacher's DRAFT/CLOSED papers.
      * Keeps teacher list aligned with /student/exams while still surfacing unpublished own work.
      */
-    @EntityGraph(attributePaths = {"teacher", "teacher.user", "sections"})
+    @EntityGraph(attributePaths = {"teacher", "teacher.user"})
     @Query("SELECT DISTINCT e FROM Exam e WHERE e.status = :activeStatus OR e.teacher = :teacher")
     List<Exam> findActiveOrOwnedByTeacher(
             @Param("activeStatus") String activeStatus,

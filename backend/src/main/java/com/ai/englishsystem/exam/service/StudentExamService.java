@@ -13,6 +13,7 @@ import com.ai.englishsystem.exam.entity.ExamType;
 import com.ai.englishsystem.exam.entity.Question;
 import com.ai.englishsystem.exam.repository.ExamAttemptRepository;
 import com.ai.englishsystem.exam.repository.ExamRepository;
+import com.ai.englishsystem.classmodule.repository.ClassStudentRepository;
 import com.ai.englishsystem.result.entity.Score;
 import com.ai.englishsystem.result.repository.ScoreRepository;
 import com.ai.englishsystem.student.entity.Student;
@@ -36,11 +37,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.HashSet;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -55,13 +58,16 @@ public class StudentExamService {
     private final StudentRepository studentRepository;
     private final ScoreRepository scoreRepository;
     private final SubmissionSuspiciousEventRepository submissionSuspiciousEventRepository;
+    private final ClassStudentRepository classStudentRepository;
 
     /**
      * Returns only ACTIVE exams for students - never exposes DRAFT/CLOSED.
      */
     @Transactional(readOnly = true)
     public List<ExamResponse> getActiveExams() {
+        Student student = resolveCurrentStudent();
         return examRepository.findByStatusWithTeacher("ACTIVE").stream()
+                .filter(exam -> canStudentAccessExam(student, exam))
                 .map(exam -> ExamResponse.builder()
                         .id(exam.getId())
                         .title(exam.getTitle())
@@ -71,6 +77,7 @@ public class StudentExamService {
                         .durationMinutes(exam.getDurationMinutes())
                         .status(exam.getStatus())
                         .examType(exam.getExamType() != null ? exam.getExamType().name() : ExamType.PRACTICE.name())
+                        .maxAttempts(exam.getMaxAttempts())
                         .createdAt(exam.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
@@ -83,6 +90,7 @@ public class StudentExamService {
                 .orElseThrow(() -> new NotFoundException("Exam", examId));
 
         assertExamAvailable(exam);
+        assertStudentCanAccessExam(student, exam);
 
         var existing = submissionRepository.findByExamAndStudentAndStatus(exam, student, SubmissionStatus.IN_PROGRESS);
         if (existing.isPresent()) {
@@ -90,17 +98,20 @@ public class StudentExamService {
             return toStartResponse(existing.get());
         }
 
-        if (exam.getExamType() == ExamType.OFFICIAL) {
-            boolean alreadyCompleted = submissionRepository.existsByExam_IdAndStudent_IdAndStatusIn(
-                    exam.getId(),
-                    student.getId(),
-                    EnumSet.of(SubmissionStatus.SUBMITTED, SubmissionStatus.AUTO_SUBMITTED)
-            );
-            if (alreadyCompleted) {
-                throw new BadRequestException(
-                        "This is an official exam. You have already completed it and cannot start again."
-                );
+        long completedAttempts = submissionRepository.countByExam_IdAndStudent_IdAndStatusIn(
+                exam.getId(),
+                student.getId(),
+                EnumSet.of(SubmissionStatus.SUBMITTED, SubmissionStatus.AUTO_SUBMITTED)
+        );
+        Integer maxAttempts = exam.getMaxAttempts();
+        if (maxAttempts == null && exam.getExamType() == ExamType.OFFICIAL) {
+            maxAttempts = 1;
+        }
+        if (maxAttempts != null && completedAttempts >= maxAttempts) {
+            if (exam.getExamType() == ExamType.OFFICIAL) {
+                throw new BadRequestException("This is an official exam. You have already completed it and cannot start again.");
             }
+            throw new BadRequestException("You have reached the maximum allowed attempts for this exam");
         }
 
         int attemptNo = examAttemptRepository.countByExam_IdAndStudent_Id(exam.getId(), student.getId()) + 1;
@@ -129,10 +140,11 @@ public class StudentExamService {
 
     @Transactional(readOnly = true)
     public StudentExamDetailResponse getExamForStudent(Integer examId) {
-        resolveCurrentStudent();
+        Student student = resolveCurrentStudent();
         Exam exam = examRepository.findById(examId)
                 .orElseThrow(() -> new NotFoundException("Exam", examId));
         assertExamAvailable(exam);
+        assertStudentCanAccessExam(student, exam);
         return mapExamForStudent(exam);
     }
 
@@ -183,29 +195,15 @@ public class StudentExamService {
                     + completion.answeredQuestions() + "/" + completion.totalQuestions()
                     + "). Minimum required: " + required + " questions.";
             throw new BadRequestException(minimumCompletionMessage);
-
-
-
-
-
-
-
-
         }
 
-        SubmissionStatus finalStatus = pastDeadline ? SubmissionStatus.AUTO_SUBMITTED : SubmissionStatus.SUBMITTED;
-        submission.setSubmitTime(now);
-        submission.setEndTime(now);
-        submission.setAnsweredQuestions(completion.answeredQuestions());
-        submission.setTotalQuestions(completion.totalQuestions());
-        submission.setCompletionPercent(completion.completionPercent());
-
+        // Calculate server duration BEFORE mutating submission (Bug #2 fix)
         long serverSecs = 0;
         if (submission.getStartTime() != null) {
             serverSecs = Duration.between(submission.getStartTime(), now).getSeconds();
         }
-        submission.setDuration((int) Math.min(serverSecs, Integer.MAX_VALUE));
-        submission.setClientReportedDuration(clientTimeSpentSeconds);
+
+        // Validate client-reported time BEFORE mutating submission (Bug #2 fix)
         if (clientTimeSpentSeconds != null) {
             if (clientTimeSpentSeconds < 0) {
                 throw new BadRequestException("Invalid reported exam time");
@@ -217,8 +215,17 @@ public class StudentExamService {
                 throw new BadRequestException("Reported time is far below server session (possible tampering)");
             }
         }
-        applyClientAnalytics(submission, submitRequest);
 
+        // All validations passed — now mutate submission
+        SubmissionStatus finalStatus = pastDeadline ? SubmissionStatus.AUTO_SUBMITTED : SubmissionStatus.SUBMITTED;
+        submission.setSubmitTime(now);
+        submission.setEndTime(now);
+        submission.setAnsweredQuestions(completion.answeredQuestions());
+        submission.setTotalQuestions(completion.totalQuestions());
+        submission.setCompletionPercent(completion.completionPercent());
+        submission.setDuration((int) Math.min(serverSecs, Integer.MAX_VALUE));
+        submission.setClientReportedDuration(clientTimeSpentSeconds);
+        applyClientAnalytics(submission, submitRequest);
         submission.setStatus(finalStatus);
         submission = submissionRepository.save(submission);
         persistSuspiciousEventSnapshot(submission);
@@ -336,9 +343,31 @@ public class StudentExamService {
                 .durationMinutes(exam.getDurationMinutes())
                 .status(exam.getStatus())
                 .examType(exam.getExamType() != null ? exam.getExamType().name() : ExamType.PRACTICE.name())
+                .maxAttempts(exam.getMaxAttempts())
                 .createdAt(exam.getCreatedAt())
                 .sections(sections)
                 .build();
+    }
+
+    private void assertStudentCanAccessExam(Student student, Exam exam) {
+        if (!canStudentAccessExam(student, exam)) {
+            throw new ForbiddenException("You are not assigned to any class allowed for this exam");
+        }
+    }
+
+    private boolean canStudentAccessExam(Student student, Exam exam) {
+        if (exam.getAllowedClasses() == null || exam.getAllowedClasses().isEmpty()) {
+            return true;
+        }
+        List<Integer> classIds = classStudentRepository.findClassIdsByStudentId(student.getId());
+        Set<Integer> studentClassIds = new HashSet<>(classIds);
+        if (studentClassIds.isEmpty()) {
+            return false;
+        }
+        return exam.getAllowedClasses().stream()
+                .map(c -> c != null ? c.getId() : null)
+                .filter(Objects::nonNull)
+                .anyMatch(studentClassIds::contains);
     }
 
     private StudentExamSectionResponse mapSection(ExamSection s) {
@@ -354,6 +383,7 @@ public class StudentExamService {
     }
 
     private StudentExamQuestionResponse mapQuestion(Question q) {
+        String questionType = normalizeType(q.getQuestionType());
         List<StudentExamOptionResponse> options = q.getOptions() == null ? List.of()
                 : q.getOptions().stream()
                 .map(o -> StudentExamOptionResponse.builder()
@@ -374,7 +404,7 @@ public class StudentExamService {
                 .listeningAudioUrl(q.getListeningAudioUrl())
                 .minWords(q.getMinWords())
                 .maxWords(q.getMaxWords())
-                .transcript(q.getTranscript())
+                .transcript("LISTENING".equals(questionType) ? null : q.getTranscript())
                 .createdAt(q.getCreatedAt())
                 .options(options)
                 .build();

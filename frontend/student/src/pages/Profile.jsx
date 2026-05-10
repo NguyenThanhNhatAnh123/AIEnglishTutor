@@ -51,7 +51,6 @@ export default function Profile() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     Promise.all([submissionApi.getMy(), studentApi.getMe().catch(() => null)])
       .then(([subRes, meRes]) => {
         if (cancelled) return;

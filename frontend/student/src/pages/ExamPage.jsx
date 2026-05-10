@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { studentExamApi, aiApi, API_ORIGIN } from '../services/api';
+import { studentExamApi, speakingApi, aiApi, API_ORIGIN } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import Modal from '../components/common/Modal';
 import Button from '../components/common/Button';
 import ExamTimer from '../components/ExamTimer';
 import AudioPlayer from '../../../packages/ui/AudioPlayer.jsx';
-import AudioRecorder from '../components/exam/AudioRecorder.jsx';
+import SpeakingRecorder from '../components/exam/SpeakingRecorder.jsx';
 
 function resolveAudioSrc(url) {
   if (!url) return null;
@@ -91,7 +91,9 @@ function isAnswered(question, value) {
       return typeof value.answerText === 'string' && value.answerText.trim().length > 0;
     case 'SPEAKING': {
       const u = value.speakingAudioUrl;
-      return typeof u === 'string' && u.length > 0 && !u.startsWith('blob:');
+      const hasUploaded = typeof u === 'string' && u.length > 0 && !u.startsWith('blob:');
+      const hasLocal = value.speakingBlob instanceof Blob;
+      return hasUploaded || hasLocal;
     }
     default:
       return !!(value.selectedOptionId || value.answerText || value.speakingAudioUrl);
@@ -209,11 +211,6 @@ function QuestionBlock({ question, value, onChange, toast, interactionLocked, su
       {promptSrc && (
         <div className="mb-4 space-y-2">
           <AudioPlayer src={promptSrc} disabled={interactionLocked} className="max-w-md" />
-          {question.transcript && type === 'LISTENING' && (
-            <div className="text-sm text-slate-600 dark:text-slate-300 rounded-xl border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 whitespace-pre-wrap">
-              {question.transcript}
-            </div>
-          )}
         </div>
       )}
       <p className="text-slate-800 dark:text-slate-100 font-medium mb-4">{question.questionText}</p>
@@ -232,13 +229,13 @@ function QuestionBlock({ question, value, onChange, toast, interactionLocked, su
         />
       )}
       {type === 'SPEAKING' && submissionId != null && (
-        <AudioRecorder
+        <SpeakingRecorder
           submissionId={submissionId}
           questionId={question.id}
+          instructionAudioUrl={question.listeningAudioUrl || question.audioUrl}
           disabled={interactionLocked}
           value={value}
           onChange={onChange}
-          toast={toast}
         />
       )}
     </div>
@@ -362,6 +359,7 @@ export default function ExamPage() {
               speakingAudioUrl: ans.speakingAudioUrl || undefined,
               speakingDurationSeconds: ans.speakingDurationSeconds ?? undefined,
               speakingFormat: ans.speakingFormat || undefined,
+              speakingBlob: null,
               imageUrl: ans.imageUrl || undefined,
             };
           }
@@ -382,6 +380,10 @@ export default function ExamPage() {
   const persistAnswer = useCallback(
     (questionId, data) => {
       if (!submission) return;
+      if (data?.speakingBlob instanceof Blob && !data?.speakingAudioUrl) {
+        // Keep local speaking audio in memory; upload only when student submits.
+        return;
+      }
       studentExamApi
         .saveAnswer({
           submissionId: submission.id,
@@ -419,9 +421,9 @@ export default function ExamPage() {
   );
 
   /* ─── Flush all unsaved + submit ───────────────────────────────────── */
-  const flushAnswers = useCallback(async () => {
+  const flushAnswers = useCallback(async (answerSnapshot) => {
     if (!submission) return;
-    const entries = Object.entries(answers).filter(([, data]) => data);
+    const entries = Object.entries(answerSnapshot).filter(([, data]) => data);
     await Promise.allSettled(
       entries.map(([qId, data]) =>
         studentExamApi.saveAnswer({
@@ -436,10 +438,42 @@ export default function ExamPage() {
         })
       )
     );
-  }, [submission, answers]);
+  }, [submission]);
+
+  const uploadSpeakingBeforeSubmit = useCallback(async (answerSnapshot) => {
+    if (!submission) return answerSnapshot;
+    const next = { ...answerSnapshot };
+    for (const q of allQuestions) {
+      const type = (q?.questionType || '').toUpperCase();
+      if (type !== 'SPEAKING') continue;
+      const answer = next[q.id];
+      if (!answer || !(answer.speakingBlob instanceof Blob)) continue;
+
+      const res = await speakingApi.upload(answer.speakingBlob, submission.id, q.id);
+      const uploaded = res.data?.data;
+      if (!uploaded?.url) {
+        throw new Error('Speaking upload succeeded but no audio URL was returned.');
+      }
+
+      next[q.id] = {
+        ...answer,
+        speakingBlob: null,
+        speakingAudioUrl: uploaded.url,
+        speakingDurationSeconds: uploaded.durationSeconds,
+        speakingFormat: uploaded.format,
+      };
+    }
+    return next;
+  }, [allQuestions, submission]);
 
   const doSubmit = useCallback(async (force = false) => {
     if (!submission || submittingRef.current) return;
+
+    // Cancel any pending debounced save before flushing (Bug fix: LOW-05)
+    if (saveRef.current) {
+      clearTimeout(saveRef.current);
+      saveRef.current = null;
+    }
 
     const requiredAnswers = Math.ceil(allQuestions.length * 0.5);
     if (!force && answeredCount < requiredAnswers) {
@@ -451,7 +485,10 @@ export default function ExamPage() {
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      await flushAnswers();
+      let answerSnapshot = { ...answers };
+      answerSnapshot = await uploadSpeakingBeforeSubmit(answerSnapshot);
+      setAnswers(answerSnapshot);
+      await flushAnswers(answerSnapshot);
       let clientTimeSpentSeconds;
       if (submission.startTime) {
         clientTimeSpentSeconds = Math.max(
@@ -471,13 +508,13 @@ export default function ExamPage() {
       });
       navigate(`/result/${submission.id}`);
     } catch (e) {
-      toast.error(e.response?.data?.message || 'Submission failed. Please try again.');
+      toast.error(e?.response?.data?.message || e?.message || 'Submission failed. Please try again.');
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
       setConfirmOpen(false);
     }
-  }, [submission, allQuestions.length, answeredCount, flushAnswers, navigate, toast]);
+  }, [submission, allQuestions.length, answeredCount, answers, flushAnswers, uploadSpeakingBeforeSubmit, navigate, toast]);
 
   const onTimerExpire = useCallback(() => {
     if (timerExpireRef.current) return;

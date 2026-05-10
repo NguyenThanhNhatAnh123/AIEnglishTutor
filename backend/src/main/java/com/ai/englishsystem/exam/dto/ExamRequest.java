@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -28,4 +30,10 @@ public class ExamRequest {
 
     /** OFFICIAL or PRACTICE (default PRACTICE when omitted). */
     private String examType;
+
+    /** Null = unlimited attempts (except OFFICIAL defaults to 1). */
+    private Integer maxAttempts;
+
+    /** Empty = unrestricted; otherwise only students in these classes can take this exam. */
+    private List<Integer> allowedClassIds;
 }

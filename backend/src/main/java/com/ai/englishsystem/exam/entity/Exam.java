@@ -1,6 +1,7 @@
 package com.ai.englishsystem.exam.entity;
 
 import com.ai.englishsystem.teacher.entity.Teacher;
+import com.ai.englishsystem.classmodule.entity.ClassEntity;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
@@ -45,6 +46,10 @@ public class Exam {
     @Builder.Default
     private ExamType examType = ExamType.PRACTICE;
 
+    /** Null means unlimited attempts. */
+    @Column(name = "max_attempts")
+    private Integer maxAttempts;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -52,6 +57,19 @@ public class Exam {
     @Builder.Default
     @JsonIgnore
     private List<ExamSection> sections = new ArrayList<>();
+
+    /**
+     * Empty = no class restriction (any student can take the exam).
+     */
+    @ManyToMany
+    @JoinTable(
+            name = "exam_allowed_classes",
+            joinColumns = @JoinColumn(name = "exam_id"),
+            inverseJoinColumns = @JoinColumn(name = "class_id")
+    )
+    @Builder.Default
+    @JsonIgnore
+    private List<ClassEntity> allowedClasses = new ArrayList<>();
 
     @PrePersist
     protected void onCreate() {

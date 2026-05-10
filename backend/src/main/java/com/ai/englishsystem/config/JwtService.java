@@ -5,6 +5,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,26 @@ public class JwtService {
 
     @Value("${app.jwt.expiration}")
     private long jwtExpiration;
+
+    /** Fail-fast at startup if JWT secret is empty or too short (Bug #9 fix). */
+    @PostConstruct
+    private void validateSecret() {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException(
+                    "JWT secret is empty! Set APP_JWT_SECRET environment variable "
+                            + "(generate with: openssl rand -base64 64)"
+            );
+        }
+        byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
+        if (keyBytes.length < 32) {
+            throw new IllegalStateException(
+                    "JWT secret is too short (" + keyBytes.length + " bytes). "
+                            + "HMAC-SHA requires at least 256 bits (32 bytes). "
+                            + "Generate with: openssl rand -base64 64"
+            );
+        }
+        log.info("JWT secret validated ({} bytes)", keyBytes.length);
+    }
 
     private SecretKey getSigningKey() {
         byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);

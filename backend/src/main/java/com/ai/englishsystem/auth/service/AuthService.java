@@ -14,6 +14,7 @@ import com.ai.englishsystem.student.repository.StudentRepository;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -85,13 +86,21 @@ public class AuthService {
                 .status("ACTIVE")
                 .build();
 
-        user = userRepository.save(user);
+        try {
+            user = userRepository.save(user);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BadRequestException("Email or username already exists");
+        }
 
         String studentCode = "STU-" + user.getId() + "-" + System.currentTimeMillis();
-        studentRepository.save(Student.builder()
-                .user(user)
-                .studentCode(studentCode)
-                .build());
+        try {
+            studentRepository.save(Student.builder()
+                    .user(user)
+                    .studentCode(studentCode)
+                    .build());
+        } catch (DataIntegrityViolationException ex) {
+            throw new BadRequestException("Student profile creation failed due to duplicated data");
+        }
 
         String token = jwtService.generateToken(user);
 

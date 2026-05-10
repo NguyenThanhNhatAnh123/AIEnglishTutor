@@ -1,0 +1,105 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ai_english_exam
+      MYSQL_USER: app_user
+      MYSQL_PASSWORD: app_password
+      MYSQL_ROOT_PASSWORD: root_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max_connections=250
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_DB_URL: jdbc:mysql://mysql:3306/ai_english_exam?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      APP_DB_USERNAME: app_user
+      APP_DB_PASSWORD: app_password
+      APP_JWT_SECRET: replace_with_64_byte_secret
+      APP_CORS_ORIGINS: http://localhost:5173,http://localhost:5174
+      APP_FLYWAY_ENABLED: "true"
+      APP_JPA_DDL_AUTO: validate
+      APP_DB_POOL_MAX: "30"
+      APP_DB_POOL_MIN_IDLE: "10"
+      APP_DB_POOL_TIMEOUT: "5000"
+      APP_DB_POOL_KEEPALIVE: "180000"
+      APP_DB_VALIDATION_TIMEOUT: "2000"
+      APP_JPA_BATCH_SIZE: "100"
+      APP_TX_TIMEOUT_SECONDS: "30"
+      APP_TOMCAT_THREADS: "100"
+      APP_TOMCAT_ACCEPT: "200"
+      APP_TOMCAT_MAX_CONN: "500"
+      APP_MANAGEMENT_EXPOSURE: health,info,metrics,prometheus
+      APP_RATE_LIMIT_BACKEND: redis
+      APP_REDIS_HOST: redis
+      APP_REDIS_PORT: "6379"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    volumes:
+      - backend_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/actuator/health | grep -q UP"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "9090:9090"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+volumes:
+  mysql_data:
+  backend_uploads:
+  prometheus_data:
+  redis_data:

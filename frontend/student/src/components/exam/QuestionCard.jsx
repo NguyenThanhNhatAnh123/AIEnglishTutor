@@ -68,6 +68,7 @@ export default function QuestionCard({ question, value, onChange, submissionId, 
           onChange={onChange}
           minWords={question.minWords ?? 0}
           maxWords={question.maxWords ?? 0}
+          disabled={interactionLocked}
         />
       )}
       {type === 'SPEAKING' && (

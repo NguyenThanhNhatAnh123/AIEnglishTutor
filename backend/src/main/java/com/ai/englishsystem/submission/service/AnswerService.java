@@ -25,6 +25,7 @@ import com.ai.englishsystem.submission.entity.Submission;
 import com.ai.englishsystem.submission.entity.SubmissionStatus;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
 import com.ai.englishsystem.submission.repository.SubmissionRepository;
+import com.ai.englishsystem.exam.entity.QuestionOption;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -174,6 +175,7 @@ public class AnswerService {
                 .map(answer -> submitted
                         ? toResponse(answer, feedbackByAnswerId.get(answer.getId()), true)
                         : toResponse(answer, null, false))
+                .sorted(Comparator.comparing(AnswerResponse::getQuestionId, Comparator.nullsLast(Integer::compareTo)))
                 .collect(Collectors.toList());
     }
 
@@ -194,6 +196,7 @@ public class AnswerService {
 
         return answers.stream()
                 .map(answer -> toResponse(answer, feedbackByAnswerId.get(answer.getId()), false))
+                .sorted(Comparator.comparing(AnswerResponse::getQuestionId, Comparator.nullsLast(Integer::compareTo)))
                 .collect(Collectors.toList());
     }
 
@@ -256,6 +259,7 @@ public class AnswerService {
         boolean hideTeacherFields = maskUnpublishedReviewsForStudent && !published;
 
         String questionText = answer.getQuestion() != null ? answer.getQuestion().getQuestionText() : null;
+        String selectedOptionText = resolveSelectedOptionText(answer);
 
         return AnswerResponse.builder()
                 .id(answer.getId())
@@ -265,6 +269,7 @@ public class AnswerService {
                 .questionType(answer.getQuestion().getQuestionType())
                 .answerText(answer.getAnswerText())
                 .selectedOptionId(answer.getSelectedOptionId())
+                .selectedOptionText(selectedOptionText)
                 .speakingAudioUrl(answer.getSpeakingAudioUrl())
                 .speakingDurationSeconds(answer.getSpeakingDurationSeconds())
                 .speakingFormat(answer.getSpeakingFormat())
@@ -284,5 +289,17 @@ public class AnswerService {
                 .speakingPublishedTranscript(isSpeaking && feedback != null && published ? feedback.getPublishedTranscript() : null)
                 .speakingPublishedAt(isSpeaking && feedback != null && published ? feedback.getPublishedAt() : null)
                 .build();
+    }
+
+    private String resolveSelectedOptionText(Answer answer) {
+        if (answer.getSelectedOptionId() == null || answer.getQuestion() == null) {
+            return null;
+        }
+        return answer.getQuestion().getOptions().stream()
+                .filter(option -> option != null && option.getId() != null
+                        && option.getId().equals(answer.getSelectedOptionId()))
+                .map(QuestionOption::getOptionText)
+                .findFirst()
+                .orElse(null);
     }
 }

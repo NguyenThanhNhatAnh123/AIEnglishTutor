@@ -15,4 +15,6 @@ public interface ScoreRepository extends JpaRepository<Score, Integer> {
     Optional<Score> findFirstBySubmissionOrderByIdAsc(Submission submission);
 
     void deleteBySubmissionIn(List<Submission> submissions);
+
+    List<Score> findBySubmissionIn(List<Submission> submissions);
 }

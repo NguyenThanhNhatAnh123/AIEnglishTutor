@@ -9,6 +9,7 @@ import com.ai.englishsystem.teacher.repository.TeacherRepository;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,7 +45,11 @@ public class TeacherService {
                 .department(request.getDepartment())
                 .build();
 
-        teacher = teacherRepository.save(teacher);
+        try {
+            teacher = teacherRepository.save(teacher);
+        } catch (DataIntegrityViolationException ex) {
+            throw new BadRequestException("Teacher code already exists");
+        }
         return toResponse(teacher);
     }
 

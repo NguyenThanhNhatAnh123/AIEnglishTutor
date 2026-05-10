@@ -24,6 +24,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final RateLimitFilter rateLimitFilter;
     private final CorsConfigurationSource corsConfigurationSource;
 
     @Value("${app.security.bcrypt-strength:12}")
@@ -43,8 +44,10 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
+                        .requestMatchers("/actuator/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/media/files/**").permitAll()
-                        .requestMatchers("/uploads/audio/**").permitAll()
+                        .requestMatchers("/uploads/audio/listening/**", "/uploads/audio/tts/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/media/upload").hasAnyRole("TEACHER", "ADMIN")
                         // FIX: allow preflight OPTIONS for all endpoints (CORS)
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
@@ -69,8 +72,12 @@ public class SecurityConfig {
                             );
                         })
                 )
-                // FIX: JWT filter runs BEFORE Spring's UsernamePasswordAuthenticationFilter
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                // JWT filter runs BEFORE Spring's UsernamePasswordAuthenticationFilter
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                // Rate limit filter runs AFTER JWT auth (so we can track per-user)
+                // but BEFORE authorization to protect all endpoints.
+                // Explicitly ordered after JwtAuthFilter to avoid fragile implicit ordering.
+                .addFilterAfter(rateLimitFilter, JwtAuthFilter.class);
 
         return http.build();
     }

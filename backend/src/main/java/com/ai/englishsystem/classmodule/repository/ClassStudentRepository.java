@@ -41,10 +41,12 @@ public interface ClassStudentRepository extends JpaRepository<ClassStudent, Inte
     @Query("""
         SELECT cs FROM ClassStudent cs
         JOIN FETCH cs.student s
-        WHERE cs.classEntity.id = :classId
-        AND s.id NOT IN (
+        WHERE s.id NOT IN (
             SELECT cs2.student.id FROM ClassStudent cs2 WHERE cs2.classEntity.id = :classId
         )
     """)
     List<ClassStudent> findStudentsNotInClass(@Param("classId") Integer classId);
+
+    @Query("SELECT cs.classEntity.id FROM ClassStudent cs WHERE cs.student.id = :studentId")
+    List<Integer> findClassIdsByStudentId(@Param("studentId") Integer studentId);
 }

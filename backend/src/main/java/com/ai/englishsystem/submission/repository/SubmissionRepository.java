@@ -18,6 +18,14 @@ public interface SubmissionRepository extends JpaRepository<Submission, Integer>
 
     List<Submission> findByExam(Exam exam);
 
+    @EntityGraph(attributePaths = {"exam", "student", "student.user", "examAttempt"})
+    @Query("""
+            SELECT s FROM Submission s
+            WHERE s.exam = :exam
+            ORDER BY COALESCE(s.endTime, s.submitTime, s.startTime) DESC, s.id DESC
+            """)
+    List<Submission> findByExamOrderByLatestWorkDateDesc(@Param("exam") Exam exam);
+
     void deleteByExam(Exam exam);
 
     @EntityGraph(attributePaths = {"exam", "student", "examAttempt"})
@@ -40,6 +48,12 @@ public interface SubmissionRepository extends JpaRepository<Submission, Integer>
     List<Submission> findByStudentOrderByStartTimeDesc(@Param("student") Student student);
 
     boolean existsByExam_IdAndStudent_IdAndStatusIn(
+            Integer examId,
+            Integer studentId,
+            Collection<SubmissionStatus> statuses
+    );
+
+    long countByExam_IdAndStudent_IdAndStatusIn(
             Integer examId,
             Integer studentId,
             Collection<SubmissionStatus> statuses

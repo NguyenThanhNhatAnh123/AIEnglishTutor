@@ -19,10 +19,10 @@ export function useFetch(fetchFn, deps = [], { immediate = true, initialData = n
   const [data, setData]       = useState(initialData);
   const [loading, setLoading] = useState(immediate);
   const [error, setError]     = useState(null);
-  const mountedRef = useRef(true);
+  const mountedRef = useRef(true); // true from start — component is mounted when hook runs
 
   useEffect(() => {
-    mountedRef.current = true;
+    // Only need cleanup — ref is already true
     return () => { mountedRef.current = false; };
   }, []);
 

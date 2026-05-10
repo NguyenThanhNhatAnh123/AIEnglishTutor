@@ -14,11 +14,11 @@ import java.util.Optional;
 public interface AnswerRepository extends JpaRepository<Answer, Integer> {
     List<Answer> findBySubmission(Submission submission);
 
-    @EntityGraph(attributePaths = {"question"})
+    @EntityGraph(attributePaths = {"question", "question.options"})
     @Query("SELECT a FROM Answer a WHERE a.submission = :sub")
     List<Answer> findBySubmissionFetchQuestion(@Param("sub") Submission submission);
 
-    @EntityGraph(attributePaths = {"question", "submission"})
+    @EntityGraph(attributePaths = {"question", "question.options", "submission"})
     @Query("SELECT a FROM Answer a WHERE a.submission.id IN :submissionIds")
     List<Answer> findBySubmissionIdInFetchQuestion(@Param("submissionIds") List<Integer> submissionIds);
 
@@ -30,6 +30,9 @@ public interface AnswerRepository extends JpaRepository<Answer, Integer> {
             JOIN FETCH s.exam e
             JOIN FETCH e.teacher t
             JOIN FETCH t.user
+            JOIN FETCH s.student st
+            JOIN FETCH st.user
+            JOIN FETCH a.question
             WHERE a.id = :id
             """)
     Optional<Answer> findWithSubmissionGraphById(@Param("id") Integer id);

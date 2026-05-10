@@ -125,6 +125,15 @@ export const aiApi = {
     // Let the browser/axios set multipart boundary automatically.
     return api.post('/ai/image-ocr-tts', formData, { headers: {} });
   },
+  ocrToQuestion: (file, sectionId, points = 1, correctChoiceIndex = 0, questionType = 'MULTIPLE_CHOICE') => {
+    const formData = new FormData();
+    formData.append('file', file, file.name || 'image.png');
+    formData.append('sectionId', String(sectionId));
+    formData.append('points', String(points));
+    formData.append('correctChoiceIndex', String(correctChoiceIndex));
+    formData.append('questionType', String(questionType));
+    return api.post('/ai/ocr-to-question', formData, { headers: {} });
+  },
   scoreSpeaking: (answerId, audioUrl) =>
     api.post('/ai/score-speaking', {
       answerId,
