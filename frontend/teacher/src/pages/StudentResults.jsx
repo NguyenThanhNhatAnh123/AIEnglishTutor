@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react';
-import { examApi, submissionApi, scoreApi, writingReviewApi, speakingReviewApi, API_ORIGIN } from '../services/api';
+import { examApi, submissionApi, scoreApi, writingReviewApi, speakingReviewApi } from '../services/api';
 import Layout from '../components/Layout';
 import Badge from '../components/common/Badge';
 import Button from '../components/common/Button';
@@ -7,15 +7,8 @@ import Modal from '../components/common/Modal';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
-import AudioPlayer from '../../../packages/ui/AudioPlayer.jsx';
-import SpeakingWaveform from '../../../packages/ui/SpeakingWaveform.jsx';
+import SpeakingAudioPlayer from '../components/SpeakingAudioPlayer.jsx';
 import { useToast } from '../context/ToastContext';
-
-function resolveMediaSrc(url) {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) return url;
-  return `${API_ORIGIN}${url.startsWith('/') ? '' : '/'}${url}`;
-}
 
 function formatDurationSeconds(sec) {
   if (sec == null || Number.isNaN(sec)) return '-';
@@ -81,6 +74,72 @@ async function downloadSpeakingClip(submissionId, answerId) {
   a.download = `speaking-${submissionId}-${answerId}.mp3`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function ReviewBadge({ status }) {
+  const published = status === 'PUBLISHED';
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-bold ${
+      published
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : 'border-amber-200 bg-amber-50 text-amber-700'
+    }`}>
+      {published ? 'Published' : 'Draft / pending'}
+    </span>
+  );
+}
+
+function MetricTile({ label, value, tone = 'slate' }) {
+  const tones = {
+    blue: 'bg-blue-50 text-blue-800 border-blue-100',
+    emerald: 'bg-emerald-50 text-emerald-800 border-emerald-100',
+    violet: 'bg-violet-50 text-violet-800 border-violet-100',
+    amber: 'bg-amber-50 text-amber-800 border-amber-100',
+    slate: 'bg-slate-50 text-slate-800 border-slate-100',
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${tones[tone] || tones.slate}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{label}</p>
+      <p className="mt-2 text-2xl font-extrabold">{value ?? '-'}</p>
+    </div>
+  );
+}
+
+function ReviewButton({ children, onClick, disabled, tone = 'blue' }) {
+  const tones = {
+    blue: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100',
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+    violet: 'border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100',
+    amber: 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100',
+  };
+  return (
+    <button
+      type="button"
+      className={`rounded-lg border px-3 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${tones[tone] || tones.blue}`}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TextBlock({ title, children, tone = 'slate', tall = false }) {
+  if (!children) return null;
+  const tones = {
+    slate: 'border-slate-200 bg-slate-50 text-slate-700',
+    sky: 'border-sky-200 bg-sky-50 text-slate-700',
+    emerald: 'border-emerald-200 bg-emerald-50 text-slate-700',
+    violet: 'border-violet-200 bg-violet-50 text-slate-700',
+  };
+  return (
+    <div className={`rounded-xl border p-3 ${tones[tone] || tones.slate}`}>
+      <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{title}</p>
+      <p className={`mt-2 text-sm leading-relaxed whitespace-pre-line ${tall ? 'max-h-52 overflow-y-auto pr-1' : ''}`}>
+        {children}
+      </p>
+    </div>
+  );
 }
 
 function ScoreDetailModal({ submission, onClose }) {
@@ -347,40 +406,49 @@ function ScoreDetailModal({ submission, onClose }) {
   };
 
   return (
-    <Modal isOpen onClose={onClose} title={`Score — ${submission.studentName || `Student #${submission.studentId}`}`} maxWidth="max-w-5xl">
+    <Modal isOpen onClose={onClose} title={`Score - ${submission.studentName || `Student #${submission.studentId}`}`} maxWidth="max-w-5xl">
       {loading ? <PageLoader /> : !score ? (
         <p className="text-slate-400 text-sm">Score not yet available for this submission.</p>
       ) : (
-        <div className="space-y-4 max-h-[82vh] overflow-y-auto pr-1">
-          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3 text-xs text-slate-600 space-y-1">
-            <p><span className="font-semibold text-slate-700">Started:</span> {submission.startTime ? new Date(submission.startTime).toLocaleString() : '—'}</p>
-            <p><span className="font-semibold text-slate-700">Ended:</span> {submission.endTime ? new Date(submission.endTime).toLocaleString() : (submission.submitTime ? new Date(submission.submitTime).toLocaleString() : '—')}</p>
-            <p><span className="font-semibold text-slate-700">Time spent:</span> {formatDurationSeconds(submission.durationSeconds)}</p>
-            <p><span className="font-semibold text-slate-700">Completion:</span> {formatCompletion(submission)}</p>
-            <p><span className="font-semibold text-slate-700">Suspicious summary:</span> {formatSuspicious(submission)}</p>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: 'Total Score', value: score.totalScore, color: 'text-blue-700' },
-              { label: 'MC Score', value: score.mcScore, color: 'text-slate-700' },
-              { label: 'Writing Score', value: score.writingScore, color: 'text-purple-700' },
-              { label: 'Speaking Score', value: score.speakingScore, color: 'text-green-700' },
-            ].filter((x) => x.value != null).map((item) => (
-              <div key={item.label} className="card text-center !p-4">
-                <p className={`text-3xl font-bold ${item.color}`}>{item.value}</p>
-                <p className="text-xs text-slate-400 mt-1">{item.label}</p>
+        <div className="max-h-[82vh] overflow-y-auto pr-1">
+          <div className="sticky top-0 z-10 -mx-1 mb-4 border-b border-slate-200 bg-white/95 px-1 pb-4 backdrop-blur">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-blue-600">AI review workspace</p>
+                <h3 className="mt-1 text-xl font-extrabold text-slate-900">
+                  {submission.examTitle || `Submission #${submission.id}`}
+                </h3>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                  <span>Started: {submission.startTime ? new Date(submission.startTime).toLocaleString() : '-'}</span>
+                  <span>Ended: {submission.endTime ? new Date(submission.endTime).toLocaleString() : (submission.submitTime ? new Date(submission.submitTime).toLocaleString() : '-')}</span>
+                  <span>Time: {formatDurationSeconds(submission.durationSeconds)}</span>
+                </div>
               </div>
+              <ReviewButton
+                tone="violet"
+                disabled={generatingAllReviews || (writingAnswers(answers).length === 0 && speakingAnswers(answers).length === 0)}
+                onClick={generateAllDraftReviews}
+              >
+                {generatingAllReviews ? 'Generating reviews...' : 'Generate all AI reviews'}
+              </ReviewButton>
+            </div>
+          </div>
+
+          <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {[
+              { label: 'Total', value: score.totalScore, tone: 'blue' },
+              { label: 'MC / auto', value: score.mcScore, tone: 'slate' },
+              { label: 'Writing', value: score.writingScore, tone: 'violet' },
+              { label: 'Speaking', value: score.speakingScore, tone: 'emerald' },
+            ].filter((x) => x.value != null).map((item) => (
+              <MetricTile key={item.label} label={item.label} value={item.value} tone={item.tone} />
             ))}
           </div>
-          <div className="flex justify-end">
-            <button
-              type="button"
-              className="text-xs text-blue-700 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={generatingAllReviews || (writingAnswers(answers).length === 0 && speakingAnswers(answers).length === 0)}
-              onClick={generateAllDraftReviews}
-            >
-              {generatingAllReviews ? 'Generating...' : 'Generate AI Reviews (Writing+Speaking)'}
-            </button>
+
+          <div className="mb-4 grid gap-3 md:grid-cols-3">
+            <MetricTile label="Completion" value={formatCompletion(submission)} tone="emerald" />
+            <MetricTile label="Suspicious" value={formatSuspicious(submission)} tone={Number(submission.suspiciousEventCount || 0) > 0 ? 'amber' : 'slate'} />
+            <MetricTile label="Subjective answers" value={writingAnswers(answers).length + speakingAnswers(answers).length} tone="violet" />
           </div>
           {objectiveAnswers(answers).length > 0 && (
             <div className="rounded-xl border border-slate-100 p-4 space-y-3">
@@ -388,8 +456,8 @@ function ScoreDetailModal({ submission, onClose }) {
               {objectiveAnswers(answers).map((a) => (
                 <div key={a.id} className="border-b border-slate-100 pb-4 last:border-0 space-y-2">
                   <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Question</p>
-                  <p className="text-xs text-slate-500">Type: {a.questionType || 'N/A'} · ID #{a.questionId}</p>
-                  <p className="text-sm text-slate-800 whitespace-pre-wrap">{a.questionText || '—'}</p>
+                  <p className="text-xs text-slate-500">Type: {a.questionType || 'N/A'} - ID #{a.questionId}</p>
+                  <p className="text-sm text-slate-800 whitespace-pre-wrap">{a.questionText || '-'}</p>
                   <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Student answer</p>
                   <p className="text-xs text-slate-700 border border-slate-100 rounded-lg p-2 bg-white">
                     {a.selectedOptionText
@@ -401,306 +469,201 @@ function ScoreDetailModal({ submission, onClose }) {
             </div>
           )}
           {speakingAnswers(answers).length > 0 && (
-            <div className="rounded-xl border border-slate-100 p-4 space-y-3">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Speaking</p>
+            <section className="mt-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-extrabold uppercase tracking-wide text-slate-700">Speaking review</h4>
+                <span className="text-xs font-semibold text-slate-500">{speakingAnswers(answers).length} answer(s)</span>
+              </div>
               {speakingAnswers(answers).map((a) => (
-                <div key={a.id} className="grid gap-4 md:grid-cols-2 border-b border-slate-100 pb-4 last:border-0">
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Question</p>
-                    <p className="text-xs text-slate-500">Type: SPEAKING · ID #{a.questionId}</p>
-                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{a.questionText || '—'}</p>
-                    <AudioPlayer src={resolveMediaSrc(a.speakingAudioUrl)} disabled={false} />
-                  <SpeakingWaveform src={resolveMediaSrc(a.speakingAudioUrl)} />
-                  <button
-                    type="button"
-                    className="text-xs text-blue-600 hover:underline"
-                    onClick={() => downloadSpeakingClip(submission.id, a.id)}
-                  >
-                    Download MP3
-                  </button>
-                  <div className="text-xs">
-                    <span className="font-semibold text-slate-500 mr-2">Status:</span>
-                    <span className={a.speakingReviewStatus === 'PUBLISHED' ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-semibold'}>
-                      {a.speakingReviewStatus === 'PUBLISHED' ? 'Published' : 'Draft / Pending Publish'}
-                    </span>
-                  </div>
-                  {a.speakingDraftTranscript && (
-                    <div className="bg-sky-50 rounded-lg p-2">
-                      <p className="text-[11px] uppercase tracking-wide text-sky-700 font-semibold">Draft Transcript</p>
-                      <p className="text-xs text-slate-700 whitespace-pre-line">{a.speakingDraftTranscript}</p>
+                <div key={a.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">SPEAKING - ID #{a.questionId}</p>
+                        <ReviewBadge status={a.speakingReviewStatus} />
+                      </div>
+                      <p className="text-sm font-semibold leading-relaxed text-slate-900">{a.questionText || '-'}</p>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <SpeakingAudioPlayer submissionId={submission.id} answerId={a.id} waveform />
+                        <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                          <span>{a.speakingDurationSeconds != null ? `${a.speakingDurationSeconds}s` : 'Unknown duration'}</span>
+                          <span>{a.speakingFormat || 'mp3'}</span>
+                          <button type="button" className="font-bold text-blue-700 hover:underline" onClick={() => downloadSpeakingClip(submission.id, a.id)}>
+                            Download MP3
+                          </button>
+                        </div>
+                      </div>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <TextBlock title="Draft transcript" tone="sky" tall>{a.speakingDraftTranscript}</TextBlock>
+                        <TextBlock title="Published transcript" tone="emerald" tall>{a.speakingPublishedTranscript}</TextBlock>
+                        <TextBlock title={`Draft review${a.speakingDraftScore != null ? ` - ${a.speakingDraftScore}` : ''}`} tone="violet" tall>{a.speakingDraftFeedback}</TextBlock>
+                        <TextBlock title={`Published review${a.speakingPublishedScore != null ? ` - ${a.speakingPublishedScore}` : ''}`} tone="emerald" tall>{a.speakingPublishedFeedback}</TextBlock>
+                      </div>
                     </div>
-                  )}
-                  {a.speakingDraftFeedback && (
-                    <div className="bg-emerald-50 rounded-lg p-2">
-                      <p className="text-[11px] uppercase tracking-wide text-emerald-700 font-semibold">Draft Review</p>
-                      {a.speakingDraftScore != null && <p className="text-xs text-emerald-800">Score: {a.speakingDraftScore}</p>}
-                      <p className="text-xs text-slate-700">{a.speakingDraftFeedback}</p>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Review controls</p>
+                      <input
+                        type="text"
+                        placeholder="Optional speaking custom prompt"
+                        value={speakingCustomPromptByAnswer[a.id] ?? ''}
+                        onChange={(e) => setSpeakingCustomPromptByAnswer((prev) => ({ ...prev, [a.id]: e.target.value }))}
+                        className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                      />
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <ReviewButton tone="emerald" disabled={speakingGeneratingAnswerId === a.id} onClick={() => generateSpeakingDraftReview(a)}>
+                          {speakingGeneratingAnswerId === a.id ? 'Generating...' : 'Generate AI'}
+                        </ReviewButton>
+                        <ReviewButton
+                          onClick={() => {
+                            setSpeakingEditingAnswerId((prev) => (prev === a.id ? null : a.id));
+                            setSpeakingDraftByAnswer((prev) => ({
+                              ...prev,
+                              [a.id]: {
+                                score: a.speakingDraftScore ?? '',
+                                feedback: a.speakingDraftFeedback ?? '',
+                                transcript: a.speakingDraftTranscript ?? '',
+                              },
+                            }));
+                          }}
+                        >
+                          Edit draft
+                        </ReviewButton>
+                        <ReviewButton tone="violet" disabled={speakingPublishingAnswerId === a.id} onClick={() => publishSpeakingReview(a)}>
+                          {speakingPublishingAnswerId === a.id ? 'Publishing...' : 'Publish'}
+                        </ReviewButton>
+                        <ReviewButton tone="amber" disabled={speakingRevertingAnswerId === a.id || a.speakingReviewStatus !== 'PUBLISHED'} onClick={() => revertSpeakingReview(a)}>
+                          {speakingRevertingAnswerId === a.id ? 'Reverting...' : 'Move draft'}
+                        </ReviewButton>
+                      </div>
+                      {speakingEditingAnswerId === a.id && (
+                        <div className="mt-4 space-y-3">
+                          <label className="block text-xs font-semibold text-slate-500">
+                            Draft score
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={speakingDraftByAnswer[a.id]?.score ?? ''}
+                              onChange={(e) => setSpeakingDraftByAnswer((prev) => ({ ...prev, [a.id]: { ...prev[a.id], score: e.target.value } }))}
+                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            />
+                          </label>
+                          <label className="block text-xs font-semibold text-slate-500">
+                            Draft transcript
+                            <textarea
+                              rows={4}
+                              value={speakingDraftByAnswer[a.id]?.transcript ?? ''}
+                              onChange={(e) => setSpeakingDraftByAnswer((prev) => ({ ...prev, [a.id]: { ...prev[a.id], transcript: e.target.value } }))}
+                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            />
+                          </label>
+                          <label className="block text-xs font-semibold text-slate-500">
+                            Draft feedback
+                            <textarea
+                              rows={5}
+                              value={speakingDraftByAnswer[a.id]?.feedback ?? ''}
+                              onChange={(e) => setSpeakingDraftByAnswer((prev) => ({ ...prev, [a.id]: { ...prev[a.id], feedback: e.target.value } }))}
+                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            />
+                          </label>
+                          <ReviewButton disabled={speakingSavingAnswerId === a.id} onClick={() => saveManualSpeakingDraft(a)}>
+                            {speakingSavingAnswerId === a.id ? 'Saving...' : 'Save draft'}
+                          </ReviewButton>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {a.speakingReviewStatus === 'PUBLISHED' && a.speakingPublishedTranscript && (
-                    <div className="bg-indigo-50 rounded-lg p-2">
-                      <p className="text-[11px] uppercase tracking-wide text-indigo-700 font-semibold">Published Transcript</p>
-                      <p className="text-xs text-slate-700 whitespace-pre-line">{a.speakingPublishedTranscript}</p>
-                    </div>
-                  )}
-                  {a.speakingReviewStatus === 'PUBLISHED' && a.speakingPublishedFeedback && (
-                    <div className="bg-violet-50 rounded-lg p-2">
-                      <p className="text-[11px] uppercase tracking-wide text-violet-700 font-semibold">Published Review</p>
-                      {a.speakingPublishedScore != null && <p className="text-xs text-violet-800">Score: {a.speakingPublishedScore}</p>}
-                      <p className="text-xs text-slate-700">{a.speakingPublishedFeedback}</p>
-                    </div>
-                  )}
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Review & publish</p>
-                    <input
-                      type="text"
-                      placeholder="Optional speaking custom prompt..."
-                      value={speakingCustomPromptByAnswer[a.id] ?? ''}
-                      onChange={(e) => setSpeakingCustomPromptByAnswer((prev) => ({ ...prev, [a.id]: e.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className="text-xs text-emerald-700 hover:underline"
-                        disabled={speakingGeneratingAnswerId === a.id}
-                        onClick={() => generateSpeakingDraftReview(a)}
-                      >
-                        {speakingGeneratingAnswerId === a.id ? 'Generating...' : 'Generate AI Review'}
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs text-blue-700 hover:underline"
-                        onClick={() => {
-                          setSpeakingEditingAnswerId((prev) => (prev === a.id ? null : a.id));
-                          setSpeakingDraftByAnswer((prev) => ({
-                            ...prev,
-                            [a.id]: {
-                              score: a.speakingDraftScore ?? '',
-                              feedback: a.speakingDraftFeedback ?? '',
-                              transcript: a.speakingDraftTranscript ?? '',
-                            },
-                          }));
-                        }}
-                      >
-                        Edit Review
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs text-purple-700 hover:underline"
-                        disabled={speakingPublishingAnswerId === a.id}
-                        onClick={() => publishSpeakingReview(a)}
-                      >
-                        {speakingPublishingAnswerId === a.id ? 'Publishing...' : 'Approve & Publish'}
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs text-amber-700 hover:underline"
-                        disabled={speakingRevertingAnswerId === a.id || a.speakingReviewStatus !== 'PUBLISHED'}
-                        onClick={() => revertSpeakingReview(a)}
-                      >
-                        {speakingRevertingAnswerId === a.id ? 'Reverting...' : 'Move to draft'}
-                      </button>
-                    </div>
-                  {speakingEditingAnswerId === a.id && (
-                    <div className="rounded-lg border border-slate-200 p-3 space-y-2">
-                      <label className="text-xs text-slate-500 block">
-                        Draft score (0-100)
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={speakingDraftByAnswer[a.id]?.score ?? ''}
-                          onChange={(e) => setSpeakingDraftByAnswer((prev) => ({
-                            ...prev,
-                            [a.id]: {
-                              ...prev[a.id],
-                              score: e.target.value,
-                            },
-                          }))}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                        />
-                      </label>
-                      <label className="text-xs text-slate-500 block">
-                        Draft transcript
-                        <textarea
-                          rows={3}
-                          value={speakingDraftByAnswer[a.id]?.transcript ?? ''}
-                          onChange={(e) => setSpeakingDraftByAnswer((prev) => ({
-                            ...prev,
-                            [a.id]: {
-                              ...prev[a.id],
-                              transcript: e.target.value,
-                            },
-                          }))}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                        />
-                      </label>
-                      <label className="text-xs text-slate-500 block">
-                        Draft feedback
-                        <textarea
-                          rows={3}
-                          value={speakingDraftByAnswer[a.id]?.feedback ?? ''}
-                          onChange={(e) => setSpeakingDraftByAnswer((prev) => ({
-                            ...prev,
-                            [a.id]: {
-                              ...prev[a.id],
-                              feedback: e.target.value,
-                            },
-                          }))}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="text-xs text-blue-700 hover:underline"
-                        disabled={speakingSavingAnswerId === a.id}
-                        onClick={() => saveManualSpeakingDraft(a)}
-                      >
-                        {speakingSavingAnswerId === a.id ? 'Saving...' : 'Save Draft Review'}
-                      </button>
-                    </div>
-                  )}
-                  {a.speakingDurationSeconds != null && (
-                    <p className="text-xs text-slate-400">{a.speakingDurationSeconds}s / {a.speakingFormat || 'mp3'}</p>
-                  )}
                   </div>
                 </div>
               ))}
-            </div>
+            </section>
           )}
           {writingAnswers(answers).length > 0 && (
-            <div className="rounded-xl border border-slate-100 p-4 space-y-3">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Writing</p>
+            <section className="mt-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-extrabold uppercase tracking-wide text-slate-700">Writing review</h4>
+                <span className="text-xs font-semibold text-slate-500">{writingAnswers(answers).length} answer(s)</span>
+              </div>
               {writingAnswers(answers).map((a) => (
-                <div key={a.id} className="grid gap-4 md:grid-cols-2 border-b border-slate-100 pb-4 last:border-0">
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Question</p>
-                    <p className="text-xs text-slate-500">Type: WRITING · ID #{a.questionId}</p>
-                    <p className="text-sm text-slate-800 whitespace-pre-wrap">{a.questionText || '—'}</p>
-                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Student answer</p>
-                    <p className="text-xs text-slate-700 whitespace-pre-wrap max-h-40 overflow-y-auto border border-slate-100 rounded-lg p-2 bg-white">{a.answerText}</p>
-                  <div className="text-xs">
-                    <span className="font-semibold text-slate-500 mr-2">Status:</span>
-                    <span className={a.writingReviewStatus === 'PUBLISHED' ? 'text-emerald-700 font-semibold' : 'text-amber-700 font-semibold'}>
-                      {a.writingReviewStatus === 'PUBLISHED' ? 'Published' : 'Draft / Pending Publish'}
-                    </span>
-                  </div>
-                  {a.writingDraftFeedback && (
-                    <div className="bg-violet-50 rounded-lg p-2">
-                      <p className="text-[11px] uppercase tracking-wide text-violet-700 font-semibold">Draft Review</p>
-                      {a.writingDraftScore != null && <p className="text-xs text-violet-800">Score: {a.writingDraftScore}</p>}
-                      <p className="text-xs text-slate-700">{a.writingDraftFeedback}</p>
+                <div key={a.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">WRITING - ID #{a.questionId}</p>
+                        <ReviewBadge status={a.writingReviewStatus} />
+                      </div>
+                      <p className="text-sm font-semibold leading-relaxed text-slate-900">{a.questionText || '-'}</p>
+                      <TextBlock title="Student answer" tall>{a.answerText}</TextBlock>
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <TextBlock title={`Draft review${a.writingDraftScore != null ? ` - ${a.writingDraftScore}` : ''}`} tone="violet" tall>{a.writingDraftFeedback}</TextBlock>
+                        <TextBlock title={`Published review${a.writingPublishedScore != null ? ` - ${a.writingPublishedScore}` : ''}`} tone="emerald" tall>{a.writingPublishedFeedback}</TextBlock>
+                      </div>
                     </div>
-                  )}
-                  {a.writingReviewStatus === 'PUBLISHED' && a.writingPublishedFeedback && (
-                    <div className="bg-emerald-50 rounded-lg p-2">
-                      <p className="text-[11px] uppercase tracking-wide text-emerald-700 font-semibold">Published Review</p>
-                      {a.writingPublishedScore != null && <p className="text-xs text-emerald-800">Score: {a.writingPublishedScore}</p>}
-                      <p className="text-xs text-slate-700">{a.writingPublishedFeedback}</p>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Review controls</p>
+                      <input
+                        type="text"
+                        placeholder="Optional custom prompt"
+                        value={customPromptByAnswer[a.id] ?? ''}
+                        onChange={(e) => setCustomPromptByAnswer((prev) => ({ ...prev, [a.id]: e.target.value }))}
+                        className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                      />
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <ReviewButton tone="violet" disabled={generatingAnswerId === a.id} onClick={() => generateDraftReview(a)}>
+                          {generatingAnswerId === a.id ? 'Generating...' : 'Generate AI'}
+                        </ReviewButton>
+                        <ReviewButton
+                          onClick={() => {
+                            setEditingAnswerId((prev) => (prev === a.id ? null : a.id));
+                            setDraftByAnswer((prev) => ({
+                              ...prev,
+                              [a.id]: {
+                                score: a.writingDraftScore ?? '',
+                                feedback: a.writingDraftFeedback ?? '',
+                              },
+                            }));
+                          }}
+                        >
+                          Edit draft
+                        </ReviewButton>
+                        <ReviewButton tone="emerald" disabled={publishingAnswerId === a.id} onClick={() => publishReview(a)}>
+                          {publishingAnswerId === a.id ? 'Publishing...' : 'Publish'}
+                        </ReviewButton>
+                        <ReviewButton tone="amber" disabled={writingRevertingAnswerId === a.id || a.writingReviewStatus !== 'PUBLISHED'} onClick={() => revertWritingReview(a)}>
+                          {writingRevertingAnswerId === a.id ? 'Reverting...' : 'Move draft'}
+                        </ReviewButton>
+                      </div>
+                      {editingAnswerId === a.id && (
+                        <div className="mt-4 space-y-3">
+                          <label className="block text-xs font-semibold text-slate-500">
+                            Draft score
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={draftByAnswer[a.id]?.score ?? ''}
+                              onChange={(e) => setDraftByAnswer((prev) => ({ ...prev, [a.id]: { ...prev[a.id], score: e.target.value } }))}
+                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            />
+                          </label>
+                          <label className="block text-xs font-semibold text-slate-500">
+                            Draft feedback
+                            <textarea
+                              rows={6}
+                              value={draftByAnswer[a.id]?.feedback ?? ''}
+                              onChange={(e) => setDraftByAnswer((prev) => ({ ...prev, [a.id]: { ...prev[a.id], feedback: e.target.value } }))}
+                              className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            />
+                          </label>
+                          <ReviewButton disabled={savingAnswerId === a.id} onClick={() => saveManualDraft(a)}>
+                            {savingAnswerId === a.id ? 'Saving...' : 'Save draft'}
+                          </ReviewButton>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Review & publish</p>
-                    <input
-                      type="text"
-                      placeholder="Optional custom prompt..."
-                      value={customPromptByAnswer[a.id] ?? ''}
-                      onChange={(e) => setCustomPromptByAnswer((prev) => ({ ...prev, [a.id]: e.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className="text-xs text-purple-700 hover:underline"
-                        disabled={generatingAnswerId === a.id}
-                        onClick={() => generateDraftReview(a)}
-                      >
-                        {generatingAnswerId === a.id ? 'Generating...' : 'Generate AI Review'}
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs text-blue-700 hover:underline"
-                        onClick={() => {
-                          setEditingAnswerId((prev) => (prev === a.id ? null : a.id));
-                          setDraftByAnswer((prev) => ({
-                            ...prev,
-                            [a.id]: {
-                              score: a.writingDraftScore ?? '',
-                              feedback: a.writingDraftFeedback ?? '',
-                            },
-                          }));
-                        }}
-                      >
-                        Edit Review
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs text-emerald-700 hover:underline"
-                        disabled={publishingAnswerId === a.id}
-                        onClick={() => publishReview(a)}
-                      >
-                        {publishingAnswerId === a.id ? 'Publishing...' : 'Approve & Publish'}
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs text-amber-700 hover:underline"
-                        disabled={writingRevertingAnswerId === a.id || a.writingReviewStatus !== 'PUBLISHED'}
-                        onClick={() => revertWritingReview(a)}
-                      >
-                        {writingRevertingAnswerId === a.id ? 'Reverting...' : 'Move to draft'}
-                      </button>
-                    </div>
-                  {editingAnswerId === a.id && (
-                    <div className="rounded-lg border border-slate-200 p-3 space-y-2">
-                      <label className="text-xs text-slate-500 block">
-                        Draft score (0-100)
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={draftByAnswer[a.id]?.score ?? ''}
-                          onChange={(e) => setDraftByAnswer((prev) => ({
-                            ...prev,
-                            [a.id]: {
-                              ...prev[a.id],
-                              score: e.target.value,
-                            },
-                          }))}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                        />
-                      </label>
-                      <label className="text-xs text-slate-500 block">
-                        Draft feedback
-                        <textarea
-                          rows={3}
-                          value={draftByAnswer[a.id]?.feedback ?? ''}
-                          onChange={(e) => setDraftByAnswer((prev) => ({
-                            ...prev,
-                            [a.id]: {
-                              ...prev[a.id],
-                              feedback: e.target.value,
-                            },
-                          }))}
-                          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="text-xs text-blue-700 hover:underline"
-                        disabled={savingAnswerId === a.id}
-                        onClick={() => saveManualDraft(a)}
-                      >
-                        {savingAnswerId === a.id ? 'Saving...' : 'Save Draft Review'}
-                      </button>
-                    </div>
-                  )}
                   </div>
                 </div>
               ))}
-            </div>
+            </section>
           )}
           {score.feedback && (
             <div className="bg-blue-50 rounded-xl p-4">
@@ -919,8 +882,7 @@ export default function StudentResults() {
                         <div className="flex flex-col gap-2 max-w-[220px]">
                           {speakingAnswers(answerMap[s.id]).map((a) => (
                             <div key={a.id} className="space-y-1 border-b border-slate-50 pb-2 last:border-0">
-                              <AudioPlayer src={resolveMediaSrc(a.speakingAudioUrl)} disabled={false} />
-                              <SpeakingWaveform src={resolveMediaSrc(a.speakingAudioUrl)} />
+                              <SpeakingAudioPlayer submissionId={s.id} answerId={a.id} waveform />
                               <button
                                 type="button"
                                 className="text-xs text-blue-600 hover:underline"

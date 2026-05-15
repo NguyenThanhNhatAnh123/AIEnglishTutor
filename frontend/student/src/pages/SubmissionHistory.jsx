@@ -6,11 +6,130 @@ import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import { useToast } from '../context/ToastContext';
 
+function formatDate(value) {
+  return value ? new Date(value).toLocaleString() : '-';
+}
+
+function formatDuration(seconds) {
+  if (seconds == null) return '-';
+  const n = Math.max(0, Number(seconds) || 0);
+  const m = Math.floor(n / 60);
+  const s = n % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function reviewLabel(status) {
+  if (status === 'PUBLISHED') return 'Published';
+  if (status === 'PENDING') return 'Teacher review';
+  return 'Not required';
+}
+
+function reviewClass(status) {
+  if (status === 'PUBLISHED') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (status === 'PENDING') return 'border-amber-200 bg-amber-50 text-amber-700';
+  return 'border-slate-200 bg-slate-50 text-slate-500';
+}
+
+function scoreLabel(submission) {
+  if (submission.status === 'IN_PROGRESS') return 'In progress';
+  if (submission.totalScore != null) return Math.round(submission.totalScore * 10) / 10;
+  if (submission.subjectiveReviewStatus === 'PENDING') return 'Pending review';
+  return 'N/A';
+}
+
+function SubmissionCard({ submission }) {
+  const completed = submission.status === 'SUBMITTED' || submission.status === 'AUTO_SUBMITTED';
+  const inProgress = submission.status === 'IN_PROGRESS';
+  const eventCount = Number(submission.suspiciousEventCount || 0);
+  const completion = submission.completionPercent != null
+    ? `${submission.completionPercent}%`
+    : submission.answeredQuestions != null && submission.totalQuestions != null
+      ? `${submission.answeredQuestions}/${submission.totalQuestions}`
+      : '-';
+
+  return (
+    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge status={submission.status} label={submission.status} />
+            <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${reviewClass(submission.subjectiveReviewStatus)}`}>
+              {reviewLabel(submission.subjectiveReviewStatus)}
+            </span>
+          </div>
+          <h3 className="mt-3 text-lg font-extrabold text-slate-900">
+            {submission.examTitle || `Exam #${submission.examId}`}
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            {inProgress ? `Started ${formatDate(submission.startTime)}` : `Ended ${formatDate(submission.endTime || submission.submitTime)}`}
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-slate-950 px-5 py-4 text-white lg:min-w-36">
+          <p className="text-xs font-bold uppercase tracking-wide text-blue-200">Score</p>
+          <p className="mt-1 text-2xl font-extrabold">{scoreLabel(submission)}</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-[11px] font-bold uppercase text-slate-500">Completion</p>
+          <p className="mt-1 font-bold text-slate-900">{completion}</p>
+          {submission.answeredQuestions != null && submission.totalQuestions != null && (
+            <p className="text-xs text-slate-500">{submission.answeredQuestions}/{submission.totalQuestions} answers</p>
+          )}
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-[11px] font-bold uppercase text-slate-500">Duration</p>
+          <p className="mt-1 font-bold text-slate-900">{formatDuration(submission.durationSeconds)}</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-[11px] font-bold uppercase text-slate-500">Writing</p>
+          <p className="mt-1 font-bold text-slate-900">{reviewLabel(submission.writingReviewStatus)}</p>
+          <p className="text-xs text-slate-500">{submission.writingAnswerCount || 0} answer(s)</p>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <p className="text-[11px] font-bold uppercase text-slate-500">Speaking</p>
+          <p className="mt-1 font-bold text-slate-900">{reviewLabel(submission.speakingReviewStatus)}</p>
+          <p className="text-xs text-slate-500">{submission.speakingAnswerCount || 0} answer(s)</p>
+        </div>
+        <div className={`rounded-xl p-3 ${eventCount > 0 ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`}>
+          <p className="text-[11px] font-bold uppercase opacity-75">Integrity</p>
+          <p className="mt-1 font-bold">{eventCount > 0 ? `${eventCount} event(s)` : 'Clean'}</p>
+          <p className="text-xs opacity-75">{submission.deviceType || '-'}</p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {submission.subjectiveReviewStatus === 'PENDING' && completed ? (
+          <p className="text-sm font-semibold text-amber-700">
+            Subjective score is hidden until your teacher publishes the review.
+          </p>
+        ) : (
+          <p className="text-sm text-slate-500">Latest activity: {formatDate(submission.endTime || submission.submitTime || submission.startTime)}</p>
+        )}
+        {completed ? (
+          <Link to={`/result/${submission.id}`} className="rounded-xl bg-blue-600 px-4 py-2.5 text-center text-sm font-bold text-white transition hover:bg-blue-700">
+            View result
+          </Link>
+        ) : inProgress ? (
+          <Link to={`/exam/${submission.examId}`} className="rounded-xl bg-amber-500 px-4 py-2.5 text-center text-sm font-bold text-white transition hover:bg-amber-600">
+            Resume exam
+          </Link>
+        ) : (
+          <span className="text-sm text-slate-400">No action</span>
+        )}
+      </div>
+    </article>
+  );
+}
+
 export default function SubmissionHistory() {
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
   const toast = useToast();
 
   useEffect(() => {
@@ -27,9 +146,19 @@ export default function SubmissionHistory() {
   }, []);
 
   const filtered = submissions.filter((s) => {
+    const q = search.trim().toLowerCase();
     const name = (s.examTitle || `Exam #${s.examId}`).toLowerCase();
-    return name.includes(search.toLowerCase());
+    const matchesText = !q || name.includes(q);
+    const matchesStatus = statusFilter === 'ALL' || s.status === statusFilter || s.subjectiveReviewStatus === statusFilter;
+    return matchesText && matchesStatus;
   });
+
+  const stats = {
+    total: submissions.length,
+    inProgress: submissions.filter((s) => s.status === 'IN_PROGRESS').length,
+    pendingReview: submissions.filter((s) => s.subjectiveReviewStatus === 'PENDING').length,
+    published: submissions.filter((s) => s.subjectiveReviewStatus === 'PUBLISHED').length,
+  };
 
   if (loading) return <PageLoader />;
 
@@ -41,7 +170,7 @@ export default function SubmissionHistory() {
         action={
           <button
             onClick={() => window.location.reload()}
-            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition"
+            className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
           >
             Retry
           </button>
@@ -52,100 +181,80 @@ export default function SubmissionHistory() {
 
   return (
     <div className="space-y-5">
-      {/* Search */}
-      <div className="card !p-4">
-        <div className="relative">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            id="submission-search"
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by exam name..."
-            aria-label="Search submissions"
-            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Submission center</p>
+            <h1 className="mt-1 text-2xl font-extrabold text-slate-900">Exam history</h1>
+            <p className="mt-1 text-sm text-slate-500">Track progress, review publication, and saved results.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[460px]">
+            {[
+              ['Total', stats.total],
+              ['Open', stats.inProgress],
+              ['Review', stats.pendingReview],
+              ['Published', stats.published],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] font-semibold uppercase text-slate-500">{label}</p>
+                <p className="text-xl font-bold text-blue-700">{value}</p>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {/* Table */}
+        <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]">
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              id="submission-search"
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by exam name..."
+              aria-label="Search submissions"
+              className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-4 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+            {[
+              ['ALL', 'All'],
+              ['IN_PROGRESS', 'Open'],
+              ['PENDING', 'Review'],
+              ['PUBLISHED', 'Published'],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setStatusFilter(value)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  statusFilter === value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-blue-700'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {filtered.length === 0 ? (
         <EmptyState
           title="No submissions found"
-          description={search ? 'Try a different search.' : 'You have not submitted any exams yet.'}
+          description={search ? 'Try a different search or filter.' : 'You have not started any exams yet.'}
           action={
-            <Link to="/exams" className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 transition">
-              Browse Exams
+            <Link to="/exams" className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
+              Browse exams
             </Link>
           }
         />
       ) : (
-        <div className="card overflow-hidden !p-0">
-          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-700 text-sm">{filtered.length} submission{filtered.length !== 1 ? 's' : ''}</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-100">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">#</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Exam</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Date Submitted</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Score</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Result</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filtered.map((s, idx) => (
-                  <tr key={s.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 text-slate-400 text-xs">{idx + 1}</td>
-                    <td className="px-4 py-3 font-medium text-slate-800">
-                      {s.examTitle || `Exam #${s.examId}`}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge status={s.status} label={s.status} />
-                    </td>
-                    <td className="px-4 py-3 text-slate-400">
-                      {s.submitTime ? new Date(s.submitTime).toLocaleString() : '\u2014'}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {s.totalScore != null ? (
-                        <span className="font-bold text-blue-700">{Math.round(s.totalScore * 10) / 10}</span>
-                      ) : (s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED') ? (
-                        <span className="text-slate-500 text-xs font-semibold tabular-nums" title="Score is hidden until your teacher publishes the review">
-                          N/A
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      {(s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED') ? (
-                        <Link
-                          to={`/result/${s.id}`}
-                          className="text-xs text-blue-600 font-semibold hover:underline"
-                        >
-                          View &rarr;
-                        </Link>
-                      ) : s.status === 'IN_PROGRESS' ? (
-                        <Link
-                          to={`/exam/${s.examId}`}
-                          className="text-xs text-amber-600 font-semibold hover:underline"
-                        >
-                          Resume &rarr;
-                        </Link>
-                      ) : (
-                        <span className="text-xs text-slate-300">&mdash;</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="grid gap-4">
+          {filtered.map((submission) => (
+            <SubmissionCard key={submission.id} submission={submission} />
+          ))}
         </div>
       )}
     </div>

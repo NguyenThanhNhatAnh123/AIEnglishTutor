@@ -47,4 +47,14 @@ public class SubmissionListResponse {
     private String deviceLabel;
 
     private Float totalScore;
+
+    private String writingReviewStatus;
+
+    private String speakingReviewStatus;
+
+    private String subjectiveReviewStatus;
+
+    private Integer writingAnswerCount;
+
+    private Integer speakingAnswerCount;
 }

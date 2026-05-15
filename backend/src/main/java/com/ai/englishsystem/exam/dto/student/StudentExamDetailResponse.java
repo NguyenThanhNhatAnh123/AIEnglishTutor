@@ -23,6 +23,10 @@ public class StudentExamDetailResponse {
     private String examType;
     /** Null means unlimited attempts. */
     private Integer maxAttempts;
+    private Long completedAttempts;
+    /** Null means unlimited attempts. */
+    private Integer remainingAttempts;
+    private Boolean hasInProgressSubmission;
 
     private LocalDateTime createdAt;
     private List<StudentExamSectionResponse> sections;

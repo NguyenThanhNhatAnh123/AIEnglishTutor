@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ErrorBoundary } from '../../packages/ui/ErrorBoundary';
+import { APP_BASE_PATH } from '../../packages/utils/constants.js';
 
 import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
@@ -43,7 +44,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <BrowserRouter>
+      <BrowserRouter basename={APP_BASE_PATH || undefined}>
         <AuthProvider>
           <ToastProvider>
             <AppRoutes />

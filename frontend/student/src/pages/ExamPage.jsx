@@ -199,6 +199,41 @@ function sectionQuestionCount(sections) {
   return (sections || []).reduce((acc, s) => acc + ((s.questions || []).length), 0);
 }
 
+function questionType(question) {
+  return (question?.questionType || '').trim().toUpperCase();
+}
+
+function hasAnyQuestion(questions, type) {
+  return questions.some((q) => questionType(q) === type);
+}
+
+function hasAnyAudioPrompt(questions) {
+  return questions.some((q) => questionType(q) === 'LISTENING' || q.listeningAudioUrl || q.audioUrl);
+}
+
+function statusTone(ok, waiting = false) {
+  if (ok) return 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100';
+  if (waiting) return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200';
+  return 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100';
+}
+
+function WaitingCheck({ label, detail, ok, waiting, action }) {
+  return (
+    <div className={`rounded-xl border p-4 ${statusTone(ok, waiting)}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold">{label}</p>
+          <p className="mt-1 text-xs leading-relaxed opacity-80">{detail}</p>
+        </div>
+        <span className="shrink-0 rounded-full bg-white/70 px-2 py-1 text-[11px] font-bold dark:bg-slate-900/60">
+          {ok ? 'Ready' : waiting ? 'Optional' : 'Needed'}
+        </span>
+      </div>
+      {action && <div className="mt-3">{action}</div>}
+    </div>
+  );
+}
+
 /* ─── Question block ───────────────────────────────────────────────────── */
 function QuestionBlock({ question, value, onChange, toast, interactionLocked, submissionId }) {
   const type = question.questionType?.toUpperCase();
@@ -259,16 +294,32 @@ export default function ExamPage() {
   const [pageIndex, setPageIndex] = useState(0);
   const [dark, setDark] = useState(() => localStorage.getItem('exam_dark') === '1');
   const [interactionLocked, setInteractionLocked] = useState(false);
+  const [saveState, setSaveState] = useState('idle');
+  const [micStatus, setMicStatus] = useState('idle');
+  const [audioChecked, setAudioChecked] = useState(false);
+  const [rulesAccepted, setRulesAccepted] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const timerExpireRef = useRef(false);
   const saveRef = useRef(null);
   const submittingRef = useRef(false);
   const analyticsRef = useRef(initialAnalytics());
   const lastWarningAtRef = useRef(0);
+  const lastSaveWarningAtRef = useRef(0);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
     localStorage.setItem('exam_dark', dark ? '1' : '0');
   }, [dark]);
+
+  useEffect(() => {
+    const updateOnline = () => setIsOnline(typeof navigator === 'undefined' ? true : navigator.onLine);
+    window.addEventListener('online', updateOnline);
+    window.addEventListener('offline', updateOnline);
+    return () => {
+      window.removeEventListener('online', updateOnline);
+      window.removeEventListener('offline', updateOnline);
+    };
+  }, []);
 
   /* Load exam details */
   useEffect(() => {
@@ -328,9 +379,47 @@ export default function ExamPage() {
   const answeredCount = allQuestions.filter((q) => isAnswered(q, answers[q.id])).length;
   const minRequiredToSubmit = Math.ceil(allQuestions.length * 0.5);
   const canSubmitByProgress = answeredCount >= minRequiredToSubmit;
+  const effectiveMaxAttempts = exam?.maxAttempts ?? (exam?.examType === 'OFFICIAL' ? 1 : null);
+  const remainingAttempts = exam?.remainingAttempts;
+  const attemptLimitReached = remainingAttempts === 0 && !exam?.hasInProgressSubmission;
+  const canStartExam = allQuestions.length > 0 && !attemptLimitReached;
+  const hasSpeakingQuestions = hasAnyQuestion(allQuestions, 'SPEAKING');
+  const hasAudioQuestions = hasAnyAudioPrompt(allQuestions);
+  const micReady = !hasSpeakingQuestions || micStatus === 'ok';
+  const audioReady = !hasAudioQuestions || audioChecked;
+  const preflightReady = isOnline && micReady && audioReady && rulesAccepted;
+  const readyToStartExam = canStartExam && preflightReady;
+  const attemptLimitText = exam?.hasInProgressSubmission
+    ? 'Resume in-progress attempt'
+    : effectiveMaxAttempts == null
+      ? 'Unlimited attempts'
+      : `${remainingAttempts ?? effectiveMaxAttempts}/${effectiveMaxAttempts} attempts left`;
+
+  const checkMicrophone = async () => {
+    if (!hasSpeakingQuestions) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMicStatus('error');
+      toast.error('This browser cannot access the microphone.');
+      return;
+    }
+    try {
+      setMicStatus('checking');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      setMicStatus('ok');
+      toast.success('Microphone is ready.');
+    } catch {
+      setMicStatus('error');
+      toast.error('Microphone permission is required for speaking questions.');
+    }
+  };
 
   /* ─── Start / Resume exam ──────────────────────────────────────────── */
   const startExam = async () => {
+    if (!readyToStartExam) {
+      toast.warning('Complete the waiting room checks before starting.');
+      return;
+    }
     try {
       const res = await studentExamApi.start(id);
       const sub = res.data?.data;
@@ -384,7 +473,8 @@ export default function ExamPage() {
         // Keep local speaking audio in memory; upload only when student submits.
         return;
       }
-      studentExamApi
+      setSaveState('saving');
+      return studentExamApi
         .saveAnswer({
           submissionId: submission.id,
           questionId,
@@ -395,9 +485,18 @@ export default function ExamPage() {
           speakingFormat: data?.speakingFormat ?? undefined,
           imageUrl: data?.imageUrl ?? undefined,
         })
-        .catch(() => {});
+        .then(() => setSaveState('saved'))
+        .catch((e) => {
+          setSaveState('error');
+          const now = Date.now();
+          if (now - lastSaveWarningAtRef.current > 4000) {
+            lastSaveWarningAtRef.current = now;
+            toast.error('Could not auto-save this answer. Please check your connection before submitting.');
+          }
+          throw e;
+        });
     },
-    [submission]
+    [submission, toast]
   );
 
   const saveAnswer = useCallback(
@@ -408,7 +507,9 @@ export default function ExamPage() {
         return { ...prev, [questionId]: mergedSlice };
       });
       if (saveRef.current) clearTimeout(saveRef.current);
-      saveRef.current = setTimeout(() => persistAnswer(questionId, mergedSlice), 600);
+      saveRef.current = setTimeout(() => {
+        persistAnswer(questionId, mergedSlice)?.catch(() => {});
+      }, 600);
     },
     [persistAnswer]
   );
@@ -424,7 +525,8 @@ export default function ExamPage() {
   const flushAnswers = useCallback(async (answerSnapshot) => {
     if (!submission) return;
     const entries = Object.entries(answerSnapshot).filter(([, data]) => data);
-    await Promise.allSettled(
+    setSaveState('saving');
+    const results = await Promise.allSettled(
       entries.map(([qId, data]) =>
         studentExamApi.saveAnswer({
           submissionId: submission.id,
@@ -438,33 +540,56 @@ export default function ExamPage() {
         })
       )
     );
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (failed.length > 0) {
+      setSaveState('error');
+      throw new Error(`Could not save ${failed.length} answer(s). Please retry before submitting.`);
+    }
+    setSaveState('saved');
   }, [submission]);
 
-  const uploadSpeakingBeforeSubmit = useCallback(async (answerSnapshot) => {
-    if (!submission) return answerSnapshot;
+  const uploadSpeakingBeforeSubmit = useCallback(async (answerSnapshot, options = {}) => {
+    if (!submission) return { answers: answerSnapshot, failures: [] };
+    const { bestEffort = false } = options;
     const next = { ...answerSnapshot };
+    const failures = [];
     for (const q of allQuestions) {
       const type = (q?.questionType || '').toUpperCase();
       if (type !== 'SPEAKING') continue;
       const answer = next[q.id];
       if (!answer || !(answer.speakingBlob instanceof Blob)) continue;
 
-      const res = await speakingApi.upload(answer.speakingBlob, submission.id, q.id);
-      const uploaded = res.data?.data;
-      if (!uploaded?.url) {
-        throw new Error('Speaking upload succeeded but no audio URL was returned.');
-      }
+      try {
+        const res = await speakingApi.upload(answer.speakingBlob, submission.id, q.id);
+        const uploaded = res.data?.data;
+        if (!uploaded?.url) {
+          throw new Error('Speaking upload succeeded but no audio URL was returned.');
+        }
 
-      next[q.id] = {
-        ...answer,
-        speakingBlob: null,
-        speakingAudioUrl: uploaded.url,
-        speakingDurationSeconds: uploaded.durationSeconds,
-        speakingFormat: uploaded.format,
-      };
+        next[q.id] = {
+          ...answer,
+          speakingBlob: null,
+          speakingAudioUrl: uploaded.url,
+          speakingDurationSeconds: uploaded.durationSeconds,
+          speakingFormat: uploaded.format,
+        };
+      } catch (e) {
+        if (!bestEffort) throw e;
+        failures.push({ questionId: q.id, error: e });
+      }
     }
-    return next;
+    return { answers: next, failures };
   }, [allQuestions, submission]);
+
+  const flushAnswersBeforeSubmit = useCallback(async (answerSnapshot, options = {}) => {
+    try {
+      await flushAnswers(answerSnapshot);
+      return true;
+    } catch (e) {
+      if (!options.bestEffort) throw e;
+      return false;
+    }
+  }, [flushAnswers]);
 
   const doSubmit = useCallback(async (force = false) => {
     if (!submission || submittingRef.current) return;
@@ -485,10 +610,18 @@ export default function ExamPage() {
     submittingRef.current = true;
     setSubmitting(true);
     try {
+      const bestEffortFinalization = force;
       let answerSnapshot = { ...answers };
-      answerSnapshot = await uploadSpeakingBeforeSubmit(answerSnapshot);
+      const uploadResult = await uploadSpeakingBeforeSubmit(answerSnapshot, { bestEffort: bestEffortFinalization });
+      answerSnapshot = uploadResult.answers;
       setAnswers(answerSnapshot);
-      await flushAnswers(answerSnapshot);
+      const flushed = await flushAnswersBeforeSubmit(answerSnapshot, { bestEffort: bestEffortFinalization });
+      if (bestEffortFinalization && uploadResult.failures.length > 0) {
+        toast.warning('Time is up. Some local speaking audio could not upload, but the exam will still be submitted.');
+      }
+      if (bestEffortFinalization && !flushed) {
+        toast.warning('Time is up. Some last-second answers may not have saved, but the exam will still be submitted.');
+      }
       let clientTimeSpentSeconds;
       if (submission.startTime) {
         clientTimeSpentSeconds = Math.max(
@@ -514,7 +647,7 @@ export default function ExamPage() {
       setSubmitting(false);
       setConfirmOpen(false);
     }
-  }, [submission, allQuestions.length, answeredCount, answers, flushAnswers, uploadSpeakingBeforeSubmit, navigate, toast]);
+  }, [submission, allQuestions.length, answeredCount, answers, flushAnswersBeforeSubmit, uploadSpeakingBeforeSubmit, navigate, toast]);
 
   const onTimerExpire = useCallback(() => {
     if (timerExpireRef.current) return;
@@ -582,6 +715,23 @@ export default function ExamPage() {
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Progress: {answeredCount} / {allQuestions.length} answered
           </p>
+          {submission && (
+            <p className={`mt-1 text-xs font-medium ${
+              saveState === 'error'
+                ? 'text-red-600'
+                : saveState === 'saving'
+                  ? 'text-blue-600'
+                  : 'text-slate-500 dark:text-slate-400'
+            }`}>
+              {saveState === 'saving'
+                ? 'Saving answers...'
+                : saveState === 'error'
+                  ? 'Auto-save needs attention'
+                  : saveState === 'saved'
+                    ? 'All saved'
+                    : 'Answers save automatically'}
+            </p>
+          )}
           <div className="mt-2 h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden max-w-md">
             <div
               className="h-full bg-blue-600 rounded-full transition-all duration-300"
@@ -623,8 +773,8 @@ export default function ExamPage() {
 
       {/* ─── Pre-start screen ──────────────────────────────────────── */}
       {!submission ? (
-        <div className="flex items-center justify-center py-20 px-4">
-          <div className="card max-w-3xl w-full dark:bg-slate-900 dark:border-slate-700">
+        <div className="flex items-center justify-center py-10 px-4">
+          <div className="card max-w-5xl w-full dark:bg-slate-900 dark:border-slate-700">
             <div className="w-16 h-16 rounded-full bg-blue-50 dark:bg-slate-800 flex items-center justify-center text-blue-500 mx-auto mb-4">
               <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -634,7 +784,7 @@ export default function ExamPage() {
             <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 text-center mb-2">{exam.title}</h2>
             <p className="text-slate-500 dark:text-slate-300 text-sm text-center mb-6">{exam.description || 'No description.'}</p>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Exam type</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">
@@ -649,17 +799,33 @@ export default function ExamPage() {
                 <p className="text-xs uppercase tracking-wide text-slate-500">Questions</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{allQuestions.length}</p>
               </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center col-span-2 sm:col-span-1">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
                 <p className="text-xs uppercase tracking-wide text-slate-500">Sections</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{exam.sections?.length || 0}</p>
               </div>
+              <div className="rounded-xl border border-blue-100 dark:border-slate-700 bg-blue-50/60 dark:bg-slate-800 p-4 text-center col-span-2 sm:col-span-1">
+                <p className="text-xs uppercase tracking-wide text-blue-600 dark:text-blue-300">Attempts</p>
+                <p className="text-sm font-bold text-blue-800 dark:text-blue-100 mt-1">{attemptLimitText}</p>
+                {exam.completedAttempts != null && (
+                  <p className="text-[11px] text-slate-500 mt-1">{exam.completedAttempts} completed</p>
+                )}
+              </div>
             </div>
-            {exam.examType === 'OFFICIAL' && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50/90 dark:bg-amber-950/30 dark:border-amber-800 p-4 text-sm text-amber-950 dark:text-amber-100 mb-6">
-                <p className="font-semibold mb-1">Official exam</p>
+            {(exam.examType === 'OFFICIAL' || attemptLimitReached || allQuestions.length === 0) && (
+              <div className={`rounded-xl border p-4 text-sm mb-6 ${
+                attemptLimitReached || allQuestions.length === 0
+                  ? 'border-red-200 bg-red-50/90 text-red-800 dark:bg-red-950/30 dark:border-red-800 dark:text-red-100'
+                  : 'border-amber-200 bg-amber-50/90 text-amber-950 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-100'
+              }`}>
+                <p className="font-semibold mb-1">
+                  {attemptLimitReached ? 'Attempt limit reached' : allQuestions.length === 0 ? 'Exam is not ready' : 'Official exam'}
+                </p>
                 <p className="text-xs leading-relaxed opacity-90">
-                  You can complete this exam only once. If you already submitted it, you cannot start again.
-                  If you disconnected, resume your in-progress session from the submissions list.
+                  {attemptLimitReached
+                    ? 'You have used all allowed attempts for this exam.'
+                    : allQuestions.length === 0
+                      ? 'This paper has no questions yet. Please contact your teacher.'
+                      : 'You can complete this exam only once unless your teacher increases the attempt limit.'}
                 </p>
               </div>
             )}
@@ -669,9 +835,15 @@ export default function ExamPage() {
                 <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Exam structure</p>
                 <div className="space-y-2 max-h-44 overflow-auto pr-1">
                   {(exam.sections || []).map((s) => (
-                    <div key={s.id} className="flex items-center justify-between text-sm">
-                      <span className="text-slate-600 dark:text-slate-300 truncate">{s.name}</span>
-                      <span className="text-slate-500 text-xs">{(s.questions || []).length} q</span>
+                    <div key={s.id} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+                      <div className="min-w-0">
+                        <span className="block truncate font-semibold text-slate-700 dark:text-slate-200">{s.name}</span>
+                        <span className="text-[11px] uppercase tracking-wide text-slate-400">{s.sectionType || 'SECTION'}</span>
+                      </div>
+                      <span className="shrink-0 text-right text-xs text-slate-500">
+                        {(s.questions || []).length} q
+                        <span className="block">{Math.max(1, Math.round(((s.questions || []).length / Math.max(1, allQuestions.length)) * (exam.durationMinutes || 0)))} min</span>
+                      </span>
                     </div>
                   ))}
                   {(!exam.sections || exam.sections.length === 0) && (
@@ -680,21 +852,74 @@ export default function ExamPage() {
                 </div>
               </div>
               <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Before you start</p>
-                <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-300 list-disc pl-4">
-                  <li>Keep a stable internet connection.</li>
-                  <li>Use headphones for listening and speaking sections.</li>
-                  <li>Allow microphone access for speaking answers (stored as MP3).</li>
-                  <li>You must answer at least 50% of questions before you can submit.</li>
-                </ul>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">Waiting room</p>
+                <div className="space-y-3">
+                  <WaitingCheck
+                    label="Connection"
+                    detail={isOnline ? 'Browser reports an active connection.' : 'Reconnect before starting.'}
+                    ok={isOnline}
+                  />
+                  <WaitingCheck
+                    label="Microphone"
+                    detail={hasSpeakingQuestions ? 'Required for speaking answers.' : 'This paper has no speaking section.'}
+                    ok={micReady}
+                    waiting={!hasSpeakingQuestions}
+                    action={hasSpeakingQuestions && (
+                      <button
+                        type="button"
+                        onClick={checkMicrophone}
+                        disabled={micStatus === 'checking'}
+                        className="rounded-lg bg-white px-3 py-2 text-xs font-bold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-60 dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-700"
+                      >
+                        {micStatus === 'checking' ? 'Checking...' : micStatus === 'ok' ? 'Check again' : 'Check microphone'}
+                      </button>
+                    )}
+                  />
+                  <WaitingCheck
+                    label="Audio"
+                    detail={hasAudioQuestions ? 'Required for listening prompts.' : 'No listening audio detected.'}
+                    ok={audioReady}
+                    waiting={!hasAudioQuestions}
+                    action={hasAudioQuestions && (
+                      <label className="inline-flex items-center gap-2 text-xs font-bold">
+                        <input
+                          type="checkbox"
+                          checked={audioChecked}
+                          onChange={(e) => setAudioChecked(e.target.checked)}
+                          className="h-4 w-4 accent-blue-600"
+                        />
+                        Headphones or speakers are ready
+                      </label>
+                    )}
+                  />
+                  <label className={`flex items-start gap-3 rounded-xl border p-4 text-sm ${statusTone(rulesAccepted)}`}>
+                    <input
+                      type="checkbox"
+                      checked={rulesAccepted}
+                      onChange={(e) => setRulesAccepted(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 accent-blue-600"
+                    />
+                    <span>
+                      <span className="block font-bold">Exam rules</span>
+                      <span className="mt-1 block text-xs opacity-80">
+                        I will keep this tab active, avoid copy/paste, and submit only my own work.
+                      </span>
+                    </span>
+                  </label>
+                </div>
               </div>
             </div>
 
             <div className="text-xs text-slate-500 mb-4 text-center">
               Total questions from sections: {sectionQuestionCount(exam.sections)}
             </div>
-            <Button variant="primary" size="lg" onClick={startExam} className="w-full">
-              Start Exam
+            {!preflightReady && canStartExam && (
+              <p className="mb-3 text-center text-xs font-semibold text-amber-700 dark:text-amber-300">
+                Complete all required checks to unlock the exam.
+              </p>
+            )}
+            <Button variant="primary" size="lg" onClick={startExam} className="w-full" disabled={!readyToStartExam}>
+              {exam.hasInProgressSubmission ? 'Resume Exam' : 'Start Exam'}
             </Button>
           </div>
         </div>

@@ -147,28 +147,31 @@ public class SubmissionService {
                         (a, b) -> a // pick first if duplicate
                 ));
 
-        Map<Integer, Boolean> subjectivePublishedBySubmissionId = resolveSubjectiveVisibility(submissionIds);
+        Map<Integer, SubmissionReviewOverview> reviewBySubmissionId = resolveReviewOverview(submissionIds);
 
         return submissions.stream()
-                .map(s -> toListResponse(s, resolveStudentVisibleTotalScore(s, scoreBySubmissionId, subjectivePublishedBySubmissionId)))
+                .map(s -> {
+                    SubmissionReviewOverview overview = reviewBySubmissionId.getOrDefault(s.getId(), SubmissionReviewOverview.empty());
+                    return toListResponse(s, resolveStudentVisibleTotalScore(s, scoreBySubmissionId, overview), overview);
+                })
                 .collect(Collectors.toList());
     }
 
     private Float resolveStudentVisibleTotalScore(
             Submission s,
             Map<Integer, Float> scoreMap,
-            Map<Integer, Boolean> subjectivePublishedBySubmissionId
+            SubmissionReviewOverview overview
     ) {
         if (s.getStatus() == SubmissionStatus.IN_PROGRESS) {
             return null;
         }
-        if (!subjectivePublishedBySubmissionId.getOrDefault(s.getId(), true)) {
+        if (!overview.allSubjectivePublished()) {
             return null;
         }
         return scoreMap.get(s.getId());
     }
 
-    private Map<Integer, Boolean> resolveSubjectiveVisibility(List<Integer> submissionIds) {
+    private Map<Integer, SubmissionReviewOverview> resolveReviewOverview(List<Integer> submissionIds) {
         if (submissionIds == null || submissionIds.isEmpty()) {
             return Map.of();
         }
@@ -184,31 +187,34 @@ public class SubmissionService {
         return submissionIds.stream()
                 .collect(Collectors.toMap(
                         Function.identity(),
-                        submissionId -> subjectiveAnswersPublished(answersBySubmissionId.getOrDefault(submissionId, List.of()), feedbackByAnswerId)
+                        submissionId -> reviewOverview(answersBySubmissionId.getOrDefault(submissionId, List.of()), feedbackByAnswerId)
                 ));
     }
 
-    private boolean subjectiveAnswersPublished(List<Answer> answers, Map<Integer, Feedback> feedbackByAnswerId) {
-        List<Answer> subjectiveAnswers = answers.stream()
-                .filter(this::isSubjectiveQuestion)
-                .toList();
-        if (subjectiveAnswers.isEmpty()) {
-            return true;
-        }
-        return subjectiveAnswers.stream()
-                .allMatch(answer -> {
-                    Feedback feedback = feedbackByAnswerId.get(answer.getId());
-                    return feedback != null && feedback.getReviewStatus() == WritingReviewStatus.PUBLISHED;
-                });
-    }
+    private SubmissionReviewOverview reviewOverview(List<Answer> answers, Map<Integer, Feedback> feedbackByAnswerId) {
+        int writingTotal = 0;
+        int writingPublished = 0;
+        int speakingTotal = 0;
+        int speakingPublished = 0;
 
-    private boolean isSubjectiveQuestion(Answer answer) {
-        String type = answer.getQuestion() != null ? answer.getQuestion().getQuestionType() : null;
-        if (type == null) {
-            return false;
+        for (Answer answer : answers) {
+            String type = answer.getQuestion() != null ? answer.getQuestion().getQuestionType() : null;
+            String normalized = type != null ? type.trim().toUpperCase() : "";
+            if (!Set.of("WRITING", "SPEAKING").contains(normalized)) {
+                continue;
+            }
+            Feedback feedback = feedbackByAnswerId.get(answer.getId());
+            boolean published = feedback != null && feedback.getReviewStatus() == WritingReviewStatus.PUBLISHED;
+            if ("WRITING".equals(normalized)) {
+                writingTotal++;
+                if (published) writingPublished++;
+            } else {
+                speakingTotal++;
+                if (published) speakingPublished++;
+            }
         }
-        String normalized = type.trim().toUpperCase();
-        return Set.of("WRITING", "SPEAKING").contains(normalized);
+
+        return new SubmissionReviewOverview(writingTotal, writingPublished, speakingTotal, speakingPublished);
     }
 
     /**
@@ -270,6 +276,10 @@ public class SubmissionService {
     }
 
     private SubmissionListResponse toListResponse(Submission s, Float totalScore) {
+        return toListResponse(s, totalScore, SubmissionReviewOverview.empty());
+    }
+
+    private SubmissionListResponse toListResponse(Submission s, Float totalScore, SubmissionReviewOverview review) {
         LocalDateTime end = s.getEndTime() != null ? s.getEndTime() : s.getSubmitTime();
         return SubmissionListResponse.builder()
                 .id(s.getId())
@@ -292,6 +302,11 @@ public class SubmissionService {
                 .deviceType(s.getDeviceType())
                 .deviceLabel(s.getDeviceLabel())
                 .totalScore(totalScore)
+                .writingReviewStatus(review.writingStatus())
+                .speakingReviewStatus(review.speakingStatus())
+                .subjectiveReviewStatus(review.subjectiveStatus())
+                .writingAnswerCount(review.writingTotal())
+                .speakingAnswerCount(review.speakingTotal())
                 .build();
     }
 
@@ -346,6 +361,13 @@ public class SubmissionService {
             if (!currentUserId.equals(ownerUserId)) {
                 throw new ForbiddenException("You do not have permission to download this file");
             }
+        } else if (SecurityUtils.hasRole("STUDENT")) {
+            Integer currentUserId = SecurityUtils.getCurrentUserId();
+            Student student = studentRepository.findByUser_Id(currentUserId)
+                    .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
+            if (!submission.getStudent().getId().equals(student.getId())) {
+                throw new ForbiddenException("You do not have permission to download this file");
+            }
         } else {
             throw new ForbiddenException("Not allowed");
         }
@@ -366,5 +388,45 @@ public class SubmissionService {
 
     public String speakingDownloadFilename(Integer answerId) {
         return "speaking-answer-" + answerId + ".mp3";
+    }
+
+    private record SubmissionReviewOverview(
+            int writingTotal,
+            int writingPublished,
+            int speakingTotal,
+            int speakingPublished
+    ) {
+        static SubmissionReviewOverview empty() {
+            return new SubmissionReviewOverview(0, 0, 0, 0);
+        }
+
+        boolean allSubjectivePublished() {
+            return isPublished(writingTotal, writingPublished) && isPublished(speakingTotal, speakingPublished);
+        }
+
+        String writingStatus() {
+            return status(writingTotal, writingPublished);
+        }
+
+        String speakingStatus() {
+            return status(speakingTotal, speakingPublished);
+        }
+
+        String subjectiveStatus() {
+            int total = writingTotal + speakingTotal;
+            int published = writingPublished + speakingPublished;
+            return status(total, published);
+        }
+
+        private static boolean isPublished(int total, int published) {
+            return total == 0 || published == total;
+        }
+
+        private static String status(int total, int published) {
+            if (total == 0) {
+                return "NOT_REQUIRED";
+            }
+            return published == total ? "PUBLISHED" : "PENDING";
+        }
     }
 }

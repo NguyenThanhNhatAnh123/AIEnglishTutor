@@ -259,7 +259,7 @@ function QuestionFormFields({
         </select>
         {selectedSection && (
           <p className="text-xs text-slate-500 mt-1">
-            Section skill: <strong>{selectedSection.sectionType}</strong> — question type must match.
+            Section skill: <strong>{selectedSection.sectionType}</strong> - question type must match.
           </p>
         )}
       </div>
@@ -321,7 +321,7 @@ function QuestionFormFields({
             </Button>
           </div>
           <p className="text-xs text-slate-500">Recommended format: MP3.</p>
-          {audioUploading && <p className="text-xs text-slate-500">Uploading…</p>}
+          {audioUploading && <p className="text-xs text-slate-500">Uploading...</p>}
           {form.listeningAudioUrl ? (
             <p className="text-xs text-slate-600 break-all">
               Saved URL: {form.listeningAudioUrl}
@@ -372,7 +372,7 @@ function QuestionFormFields({
 
       {(form.questionType === QUESTION_TYPES.MULTIPLE_CHOICE || form.questionType === QUESTION_TYPES.LISTENING) && (
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">Answer options (≥2, pick one correct)</label>
+          <label className="block text-sm font-medium text-slate-700 mb-2">Answer options (at least 2, pick one correct)</label>
           <div className="space-y-2">
             {form.options.map((o, i) => (
               <div key={i} className="flex items-center gap-2">
@@ -642,7 +642,7 @@ function AddQuestionModal({ examId, onClose, onSuccess }) {
                             )
                           }
                           className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Type the question…"
+                          placeholder="Type the question..."
                         />
                       </div>
                       <button
@@ -1085,8 +1085,8 @@ export default function QuestionBank() {
                   <tr key={q.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 text-slate-400 text-xs">{idx + 1}</td>
                     <td className="px-4 py-3 text-xs text-slate-600 max-w-[140px]">
-                      <p className="font-medium text-slate-800 truncate">{q.examTitle || '—'}</p>
-                      <p className="text-slate-500 truncate">{q.sectionName || '—'}</p>
+                      <p className="font-medium text-slate-800 truncate">{q.examTitle || '-'}</p>
+                      <p className="text-slate-500 truncate">{q.sectionName || '-'}</p>
                     </td>
                     <td className="px-4 py-3 text-slate-800 max-w-xs">
                       <p className="truncate">{q.questionText}</p>
@@ -1141,7 +1141,7 @@ export default function QuestionBank() {
           <div className="space-y-3">
             <Badge status={preview.questionType} label={preview.questionType?.replace('_', ' ')} />
             <p className="text-xs text-slate-500">
-              {preview.examTitle} · {preview.sectionName}
+              {preview.examTitle} - {preview.sectionName}
             </p>
             <p className="text-slate-800">{preview.questionText}</p>
             <p className="text-xs text-slate-400">{preview.points} point{preview.points !== 1 ? 's' : ''}</p>
@@ -1170,7 +1170,7 @@ export default function QuestionBank() {
                       o.isCorrect ? 'bg-green-50 text-green-700 font-medium' : 'bg-slate-50 text-slate-600'
                     }`}
                   >
-                    {o.isCorrect && <span className="text-green-500">✓</span>}
+                    {o.isCorrect && <span className="text-green-500">Correct</span>}
                     {o.optionText}
                   </div>
                 ))}

@@ -14,19 +14,23 @@ import com.ai.englishsystem.media.audio.FfmpegAudioService;
 import com.ai.englishsystem.speaking.dto.SpeakingUploadResponse;
 import com.ai.englishsystem.student.entity.Student;
 import com.ai.englishsystem.student.repository.StudentRepository;
+import com.ai.englishsystem.submission.entity.Answer;
 import com.ai.englishsystem.submission.entity.Submission;
 import com.ai.englishsystem.submission.entity.SubmissionStatus;
+import com.ai.englishsystem.submission.repository.AnswerRepository;
 import com.ai.englishsystem.submission.repository.SubmissionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -45,6 +49,8 @@ public class SpeakingUploadService {
             "audio/x-wav",
             "audio/webm",
             "video/webm",
+            "audio/mp4",
+            "audio/x-m4a",
             "audio/ogg",
             "application/octet-stream"
     );
@@ -54,10 +60,16 @@ public class SpeakingUploadService {
     private final StudentRepository studentRepository;
     private final StudentExamService studentExamService;
     private final FfmpegAudioService ffmpegAudioService;
+    private final AnswerRepository answerRepository;
+    private final SpeakingFileStorage speakingFileStorage;
 
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
 
+    @Value("${app.speaking.upload-grace-seconds:180}")
+    private int uploadGraceSeconds;
+
+    @Transactional
     public SpeakingUploadResponse upload(Integer submissionId, Integer questionId, MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BadRequestException("File is empty");
@@ -66,8 +78,8 @@ public class SpeakingUploadService {
             throw new BadRequestException("Audio must be 5 MB or smaller");
         }
 
-        String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_DECLARED_TYPES.contains(contentType.toLowerCase(Locale.ROOT))) {
+        String contentType = normalizeContentType(file.getContentType());
+        if (contentType == null || !ALLOWED_DECLARED_TYPES.contains(contentType)) {
             throw new BadRequestException("Unsupported Content-Type for audio upload");
         }
 
@@ -84,7 +96,7 @@ public class SpeakingUploadService {
         if (submission.getStatus() != SubmissionStatus.IN_PROGRESS) {
             throw new BadRequestException("Submission is not in progress");
         }
-        studentExamService.assertWithinDeadline(submission);
+        assertWithinUploadWindow(submission);
 
         Question question = questionRepository.findByIdWithSectionExam(questionId)
                 .orElseThrow(() -> new NotFoundException("Question", questionId));
@@ -92,10 +104,14 @@ public class SpeakingUploadService {
         if (!questionBelongsToExam(question, submission)) {
             throw new BadRequestException("Question does not belong to this exam");
         }
+        if (!"SPEAKING".equals(normalizeQuestionType(question.getQuestionType()))) {
+            throw new BadRequestException("Audio uploads are only allowed for speaking questions");
+        }
 
         Path dir = Paths.get(uploadDir).toAbsolutePath().normalize().resolve("audio").resolve("speaking");
         String unique = UUID.randomUUID().toString().replace("-", "");
         Path raw = dir.resolve(unique + "_raw.bin");
+        Path outMp3 = null;
 
         try {
             Files.createDirectories(dir);
@@ -105,7 +121,7 @@ public class SpeakingUploadService {
             DetectedAudioFormat magic = AudioMagicValidator.detectFormat(head);
             assertDeclaredMimeMatchesMagic(contentType, magic);
 
-            Path outMp3 = dir.resolve(unique + "_" + student.getId() + "_" + questionId + ".mp3").normalize();
+            outMp3 = dir.resolve(unique + "_" + student.getId() + "_" + questionId + ".mp3").normalize();
             if (!outMp3.startsWith(dir)) {
                 throw new BadRequestException("Invalid path");
             }
@@ -115,6 +131,7 @@ public class SpeakingUploadService {
 
             int duration = ffmpegAudioService.probeDurationSeconds(outMp3);
             String url = "/uploads/audio/speaking/" + outMp3.getFileName();
+            persistSpeakingAnswer(submission, question, url, duration);
             log.info("Speaking audio stored as mp3: {}", url);
             return SpeakingUploadResponse.builder()
                     .url(url)
@@ -124,6 +141,9 @@ public class SpeakingUploadService {
         } catch (BadRequestException | ForbiddenException | NotFoundException e) {
             try {
                 Files.deleteIfExists(raw);
+                if (outMp3 != null) {
+                    Files.deleteIfExists(outMp3);
+                }
             } catch (IOException ignored) {
                 // ignore
             }
@@ -131,6 +151,9 @@ public class SpeakingUploadService {
         } catch (Exception e) {
             try {
                 Files.deleteIfExists(raw);
+                if (outMp3 != null) {
+                    Files.deleteIfExists(outMp3);
+                }
             } catch (IOException ignored) {
                 // ignore
             }
@@ -139,8 +162,35 @@ public class SpeakingUploadService {
         }
     }
 
+    private void persistSpeakingAnswer(Submission submission, Question question, String url, int duration) {
+        Answer answer = answerRepository.findBySubmissionAndQuestion(submission, question)
+                .orElseGet(() -> Answer.builder()
+                        .submission(submission)
+                        .question(question)
+                        .build());
+        String previousUrl = answer.getSpeakingAudioUrl();
+        answer.setSpeakingAudioUrl(url);
+        answer.setSpeakingDurationSeconds(duration);
+        answer.setSpeakingFormat("mp3");
+        answerRepository.save(answer);
+        if (previousUrl != null && !previousUrl.equals(url)) {
+            speakingFileStorage.deleteIfExists(previousUrl);
+        }
+    }
+
+    private void assertWithinUploadWindow(Submission submission) {
+        LocalDateTime deadline = studentExamService.resolveDeadline(submission);
+        int graceSeconds = Math.max(0, uploadGraceSeconds);
+        if (LocalDateTime.now().isAfter(deadline.plusSeconds(graceSeconds))) {
+            throw new BadRequestException("Exam time has expired");
+        }
+    }
+
     private static void assertDeclaredMimeMatchesMagic(String contentType, DetectedAudioFormat magic) {
-        String ct = contentType.toLowerCase(Locale.ROOT);
+        String ct = normalizeContentType(contentType);
+        if (ct == null) {
+            throw new BadRequestException("Unsupported Content-Type for audio upload");
+        }
         if ("application/octet-stream".equals(ct)) {
             return;
         }
@@ -148,12 +198,24 @@ public class SpeakingUploadService {
             case "audio/webm", "video/webm" -> DetectedAudioFormat.WEBM;
             case "audio/wav", "audio/x-wav" -> DetectedAudioFormat.WAV;
             case "audio/mpeg", "audio/mp3" -> DetectedAudioFormat.MP3;
+            case "audio/mp4", "audio/x-m4a" -> DetectedAudioFormat.MP4;
             case "audio/ogg" -> DetectedAudioFormat.OGG;
             default -> DetectedAudioFormat.UNKNOWN;
         };
         if (expected != DetectedAudioFormat.UNKNOWN && expected != magic) {
             throw new BadRequestException("File content does not match declared type (possible spoofing)");
         }
+    }
+
+    private static String normalizeContentType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return null;
+        }
+        return contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String normalizeQuestionType(String questionType) {
+        return questionType == null ? "" : questionType.trim().toUpperCase(Locale.ROOT);
     }
 
     private static boolean questionBelongsToExam(Question question, Submission submission) {

@@ -6,13 +6,13 @@ import { PageLoader } from '../components/common/LoadingSpinner';
 
 function StatCard({ label, value, icon, color }) {
   return (
-    <div className="card flex items-center gap-4">
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${color}`}>
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+      <div className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl ${color}`}>
         {icon}
       </div>
       <div>
-        <p className="text-2xl font-bold text-slate-800">{value}</p>
-        <p className="text-sm text-slate-500">{label}</p>
+        <p className="text-3xl font-extrabold text-slate-900">{value}</p>
+        <p className="mt-1 text-sm font-medium text-slate-500">{label}</p>
       </div>
     </div>
   );
@@ -80,13 +80,50 @@ export default function Dashboard() {
   const recentAttempts = [...submissions]
     .sort((a, b) => getLatestAttemptTime(b) - getLatestAttemptTime(a))
     .slice(0, 8);
+  const nextExam = exams.find((e) => !submittedExamIds.has(e.id));
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl bg-gradient-to-r from-blue-700 to-blue-500 p-6 text-white">
-        <p className="text-blue-200 text-sm font-medium uppercase tracking-wider mb-1">Welcome back,</p>
-        <h2 className="text-2xl font-bold">{user?.fullName || user?.username || 'Student'}</h2>
-        <p className="text-blue-100 mt-1 text-sm">Track your learning progress and latest results.</p>
+      <div className="rounded-2xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-wide text-blue-200">Student cockpit</p>
+            <h2 className="mt-2 text-3xl font-extrabold">{user?.fullName || user?.username || 'Student'}</h2>
+            <p className="mt-2 max-w-2xl text-sm text-slate-300">Follow assigned exams, open sessions, and published scores from one clean workspace.</p>
+          </div>
+          <div className="rounded-2xl bg-white p-4 text-slate-950 shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Completion</p>
+            <p className="mt-1 text-3xl font-extrabold">{completionRate}%</p>
+            <p className="text-xs text-slate-500">{completedExamCount}/{exams.length || 0} exams completed</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Next action</p>
+              <h3 className="mt-1 text-xl font-extrabold text-slate-900">
+                {nextExam ? nextExam.title : 'All assigned exams completed'}
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {nextExam ? `${nextExam.durationMinutes || 0} minutes - ${nextExam.examType === 'OFFICIAL' ? 'Official' : 'Practice'}` : 'Check submissions for published reviews and feedback.'}
+              </p>
+            </div>
+            <Link
+              to={nextExam ? `/exam/${nextExam.id}` : '/submissions'}
+              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
+            >
+              {nextExam ? 'Open exam' : 'View results'}
+            </Link>
+          </div>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Score health</p>
+          <p className="mt-2 text-3xl font-extrabold text-slate-900">{formatScore(averageScore)}</p>
+          <p className="text-sm text-slate-500">Average across published scores</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">

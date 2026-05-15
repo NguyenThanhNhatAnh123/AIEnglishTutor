@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { API_BASE_URL, API_ORIGIN } from '../../../packages/utils/constants.js';
+import { API_BASE_URL, API_ORIGIN, APP_BASE_PATH } from '../../../packages/utils/constants.js';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -24,10 +24,11 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (r) => r,
   (e) => {
-    if (e.response?.status === 401) {
+    const isLoginRequest = e.config?.url?.includes('/auth/login');
+    if (e.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      window.location.href = `${window.location.origin}${APP_BASE_PATH}/login`;
     }
     return Promise.reject(e);
   }
@@ -60,6 +61,8 @@ export const submissionApi = {
   getMy: () => api.get('/submissions/my'),
   /** Own submission detail (title, status, timing) — server enforces ownership */
   getById: (submissionId) => api.get(`/submissions/${submissionId}`),
+  downloadSpeaking: (submissionId, answerId) =>
+    api.get(`/submissions/${submissionId}/answers/${answerId}/speaking`, { responseType: 'blob' }),
 };
 
 export const scoreApi = {

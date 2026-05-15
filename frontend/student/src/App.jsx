@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ErrorBoundary } from '../../packages/ui/ErrorBoundary';
+import { APP_BASE_PATH } from '../../packages/utils/constants.js';
 import Layout from './components/layout/Layout';
 
 import LoginPage from './pages/LoginPage';
@@ -47,7 +48,7 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <div className="min-h-screen bg-slate-50">
-              <div className="max-w-3xl mx-auto px-6 py-8">
+              <div className="max-w-6xl mx-auto px-4 py-8 sm:px-6">
                 <ExamResult />
               </div>
             </div>
@@ -69,7 +70,7 @@ function RequireAuth({ children }) {
 export default function App() {
   return (
     <ErrorBoundary>
-      <BrowserRouter>
+      <BrowserRouter basename={APP_BASE_PATH || undefined}>
         <AuthProvider>
           <ToastProvider>
             <AppRoutes />

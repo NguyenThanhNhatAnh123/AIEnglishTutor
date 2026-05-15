@@ -4,10 +4,12 @@
 
 `docker-compose.yml` now provides a production-like local stack:
 
-- `mysql` (persistent volume + healthcheck)
 - `backend` (Spring Boot + Flyway + healthcheck)
-- `nginx` (reverse proxy, `/api`, `/actuator/health`, `/actuator/prometheus`)
+- `aiservice` (local OCR/TTS/STT service with Whisper preload)
+- `redis` (rate-limit counters with password + healthcheck)
+- `nginx` (student/teacher static bundles, `/api`, `/uploads`, `/actuator/health`, `/actuator/prometheus`)
 - `prometheus` (scrape backend metrics)
+- Optional `mysql` container behind the `docker-db` profile
 
 Related files:
 
@@ -32,11 +34,17 @@ cd ..
 docker compose up -d --build
 ```
 
+By default, backend connects to the host MySQL at `host.docker.internal:3306`, database `ai_english_exam`, user `root`, password `123`. Nginx is published on host port `8088` to avoid Windows/IIS/HTTP.sys bindings on `80`.
+The backend service also loads `backend/.env` for provider secrets such as `APP_DEEPSEEK_API_KEY`; explicit Docker Compose values still override local-only values like `APP_AI_LOCAL_URL` so container traffic uses `http://aiservice:8002`.
+Uploaded media is bind-mounted from the project `uploads/` directory into `/app/uploads`, which keeps `/uploads/**` writable for the non-root backend container user.
+
+To use the optional Docker MySQL instead, start with the `docker-db` profile and override `APP_DB_URL=jdbc:mysql://mysql:3306/ai_english_exam?...`, `APP_DB_USERNAME`, and `APP_DB_PASSWORD`.
+
 ## 3) Smoke checks
 
 - Backend health: `http://localhost:8080/actuator/health`
 - Prometheus scrape: `http://localhost:8080/actuator/prometheus`
-- Nginx gateway: `http://localhost/`
+- Nginx gateway: `http://localhost:8088/`
 - Prometheus UI: `http://localhost:9090`
 
 Browser smoke (teacher/student + backend local):
@@ -50,12 +58,20 @@ Browser smoke (teacher/student + backend local):
 At minimum:
 
 ```bash
-APP_JWT_SECRET=replace_with_64_byte_secret
-APP_CORS_ORIGINS=https://student.example.com,https://teacher.example.com
+APP_DB_PASSWORD=change_me
+APP_DB_USERNAME=root
+APP_DB_PORT=3306
+APP_DB_NAME=ai_english_exam
+NGINX_HTTP_PORT=8088
+APP_JWT_SECRET=generate_with_openssl_rand_base64_64
+APP_REDIS_PASSWORD=change_me
+APP_CORS_ALLOWED_ORIGINS=https://your-domain.example
 APP_DEEPSEEK_API_KEY=replace_if_enabled
 APP_WHISPER_API_KEY=
 APP_OCR_SPACE_API_KEY=
 ```
+
+Nginx serves the student app under `/student/`, the teacher app under `/teacher/`, proxies API calls through `/api/`, and proxies uploaded media through `/uploads/`.
 
 Pool + transaction defaults are tuned to safer baselines:
 

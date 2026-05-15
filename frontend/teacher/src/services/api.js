@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { API_BASE_URL, API_ORIGIN } from '../../../packages/utils/constants.js';
+import { API_BASE_URL, API_ORIGIN, APP_BASE_PATH } from '../../../packages/utils/constants.js';
 
 /** Upload audio without forcing JSON Content-Type (multipart boundary). */
 async function uploadAudioMultipart(file) {
@@ -28,16 +28,25 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
+
+  // If payload is FormData, let the browser set multipart/form-data with boundary.
+  if (config.data instanceof FormData) {
+    if (config.headers) {
+      delete config.headers['Content-Type'];
+      delete config.headers['content-type'];
+    }
+  }
   return config;
 });
 
 api.interceptors.response.use(
   (r) => r,
   (e) => {
-    if (e.response?.status === 401) {
+    const isLoginRequest = e.config?.url?.includes('/auth/login');
+    if (e.response?.status === 401 && !isLoginRequest) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      window.location.href = `${window.location.origin}${APP_BASE_PATH}/login`;
     }
     return Promise.reject(e);
   }

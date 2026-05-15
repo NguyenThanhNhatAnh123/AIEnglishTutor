@@ -31,6 +31,11 @@ public final class AudioMagicValidator {
                 && head[8] == 'W' && head[9] == 'A' && head[10] == 'V' && head[11] == 'E') {
             return DetectedAudioFormat.WAV;
         }
+        // ISO BMFF / MP4 / M4A: size(4) + "ftyp"
+        if (head.length >= 12
+                && head[4] == 'f' && head[5] == 't' && head[6] == 'y' && head[7] == 'p') {
+            return DetectedAudioFormat.MP4;
+        }
         // Ogg
         if (head.length >= 4 && head[0] == 'O' && head[1] == 'g' && head[2] == 'g' && head[3] == 'S') {
             return DetectedAudioFormat.OGG;
@@ -67,7 +72,7 @@ public final class AudioMagicValidator {
         try {
             byte[] head = readHead(file, 32);
             if (detectFormat(head) == DetectedAudioFormat.UNKNOWN) {
-                throw new BadRequestException("Unrecognized audio format (expected mp3, wav, webm, or ogg)");
+                throw new BadRequestException("Unrecognized audio format (expected mp3, wav, webm, m4a/mp4, or ogg)");
             }
         } catch (BadRequestException e) {
             throw e;

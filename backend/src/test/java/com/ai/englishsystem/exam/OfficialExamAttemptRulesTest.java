@@ -5,7 +5,10 @@ import com.ai.englishsystem.auth.repository.RoleRepository;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.entity.ExamAttempt;
+import com.ai.englishsystem.exam.entity.ExamSection;
+import com.ai.englishsystem.exam.entity.ExamSectionType;
 import com.ai.englishsystem.exam.entity.ExamType;
+import com.ai.englishsystem.exam.entity.Question;
 import com.ai.englishsystem.exam.repository.ExamAttemptRepository;
 import com.ai.englishsystem.exam.repository.ExamRepository;
 import com.ai.englishsystem.exam.service.StudentExamService;
@@ -118,6 +121,7 @@ class OfficialExamAttemptRulesTest {
                 .status("ACTIVE")
                 .examType(ExamType.OFFICIAL)
                 .build());
+        addReadyQuestion(exam);
 
         ExamAttempt attempt = examAttemptRepository.save(ExamAttempt.builder()
                 .exam(exam)
@@ -178,6 +182,7 @@ class OfficialExamAttemptRulesTest {
                 .status("ACTIVE")
                 .examType(ExamType.PRACTICE)
                 .build());
+        addReadyQuestion(exam);
 
         ExamAttempt attempt = examAttemptRepository.save(ExamAttempt.builder()
                 .exam(exam)
@@ -204,6 +209,26 @@ class OfficialExamAttemptRulesTest {
                 new TestingAuthenticationToken(String.valueOf(userId), null, authority);
         authentication.setAuthenticated(true);
         SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
+    private void addReadyQuestion(Exam exam) {
+        ExamSection section = ExamSection.builder()
+                .exam(exam)
+                .name("Writing")
+                .sectionType(ExamSectionType.WRITING)
+                .orderIndex(0)
+                .build();
+        Question question = Question.builder()
+                .section(section)
+                .questionText("Read the prompt and answer.")
+                .questionType("WRITING")
+                .points(1)
+                .minWords(1)
+                .maxWords(50)
+                .build();
+        section.getQuestions().add(question);
+        exam.getSections().add(section);
+        examRepository.saveAndFlush(exam);
     }
 
     private record Fixture(Exam exam, Submission submission, Integer studentUserId) {

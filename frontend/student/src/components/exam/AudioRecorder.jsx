@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import Button from '../common/Button';
+import { speakingApi } from '../../services/api';
 
 /**
- * Record locally during exam. Upload happens only when student submits the exam.
+ * Record during exam and upload immediately after recording stops.
+ * If upload fails, the local Blob is kept so submit can retry as a fallback.
  *
  * @param {object} props
  * @param {number} props.submissionId
@@ -16,26 +18,40 @@ export default function AudioRecorder({
   submissionId,
   questionId,
   disabled = false,
+  maxSeconds = 180,
   value,
   onChange,
   toast,
 }) {
   const [recording, setRecording] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [localReady, setLocalReady] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const mediaRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
   const startedAtRef = useRef(0);
+  const timerRef = useRef(null);
 
   const hasServer = typeof value?.speakingAudioUrl === 'string' && value.speakingAudioUrl.length > 0;
   const hasLocalBlob = value?.speakingBlob instanceof Blob;
 
   useEffect(() => () => {
+    if (timerRef.current) clearInterval(timerRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
   }, []);
 
+  const stopRecord = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    mediaRef.current?.stop();
+    setRecording(false);
+  };
+
   const startRecord = async () => {
-    if (disabled || submissionId == null || questionId == null) return;
+    if (disabled || uploading || submissionId == null || questionId == null) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -47,7 +63,11 @@ export default function AudioRecorder({
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
-      recorder.onstop = () => {
+      recorder.onstop = async () => {
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
         const blob = new Blob(chunksRef.current, { type: mime || 'audio/webm' });
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -60,10 +80,39 @@ export default function AudioRecorder({
           speakingDurationSeconds: seconds,
           speakingFormat: mime || 'webm',
         });
-        toast.info('Recording saved locally. Audio will upload when you submit the exam.');
+        setUploading(true);
+        toast.info('Recording saved locally. Uploading audio now...');
+        try {
+          const res = await speakingApi.upload(blob, submissionId, questionId);
+          const uploaded = res.data?.data;
+          if (!uploaded?.url) {
+            throw new Error('Speaking upload succeeded but no audio URL was returned.');
+          }
+          setLocalReady(false);
+          onChange?.({
+            speakingBlob: null,
+            speakingAudioUrl: uploaded.url,
+            speakingDurationSeconds: uploaded.durationSeconds ?? seconds,
+            speakingFormat: uploaded.format || 'mp3',
+          });
+          toast.success('Recording uploaded and saved.');
+        } catch (e) {
+          toast.error(e?.response?.data?.message || e?.message || 'Upload failed. Audio will retry when you submit.');
+        } finally {
+          setUploading(false);
+        }
       };
       recorder.start();
       startedAtRef.current = Date.now();
+      setElapsedSeconds(0);
+      timerRef.current = setInterval(() => {
+        const elapsed = Math.max(0, Math.floor((Date.now() - startedAtRef.current) / 1000));
+        setElapsedSeconds(elapsed);
+        if (elapsed >= maxSeconds) {
+          toast.info(`Recording stopped at ${maxSeconds}s.`);
+          stopRecord();
+        }
+      }, 500);
       setLocalReady(false);
       setRecording(true);
     } catch (e) {
@@ -75,11 +124,6 @@ export default function AudioRecorder({
         toast.error('Could not start recording on this device/browser.');
       }
     }
-  };
-
-  const stopRecord = () => {
-    mediaRef.current?.stop();
-    setRecording(false);
   };
 
   const clearLocal = () => {
@@ -120,9 +164,9 @@ export default function AudioRecorder({
 
       <p className="text-sm font-medium text-slate-600 dark:text-slate-300 text-center px-2">
         {disabled
-          ? 'Recording disabled — exam time has ended.'
+          ? 'Recording disabled - exam time has ended.'
           : recording
-            ? 'Recording... speak clearly.'
+            ? `Recording... ${elapsedSeconds}s / ${maxSeconds}s`
             : (localReady || hasLocalBlob)
               ? 'Recording saved locally. It will upload when you submit the exam.'
               : hasServer
@@ -132,16 +176,16 @@ export default function AudioRecorder({
 
       <div className="flex flex-wrap gap-2 justify-center">
         {recording ? (
-          <Button variant="danger" onClick={stopRecord} disabled={disabled}>
+          <Button variant="danger" onClick={stopRecord} disabled={disabled || uploading}>
             Stop
           </Button>
         ) : (
-          <Button variant="primary" onClick={startRecord} disabled={disabled}>
-            {(localReady || hasLocalBlob || hasServer) ? 'Re-record' : 'Start recording'}
+          <Button variant="primary" onClick={startRecord} disabled={disabled || uploading}>
+            {uploading ? 'Uploading...' : (localReady || hasLocalBlob || hasServer) ? 'Re-record' : 'Start recording'}
           </Button>
         )}
         {(localReady || hasLocalBlob) && !recording && (
-          <Button variant="secondary" onClick={clearLocal} disabled={disabled}>
+          <Button variant="secondary" onClick={clearLocal} disabled={disabled || uploading}>
             Clear recording
           </Button>
         )}
@@ -149,7 +193,7 @@ export default function AudioRecorder({
 
       {(hasLocalBlob || hasServer) && value?.speakingDurationSeconds != null && (
         <p className="text-xs text-slate-500">
-          Duration: {value.speakingDurationSeconds}s · {value.speakingFormat || 'audio'}
+          Duration: {value.speakingDurationSeconds}s - {value.speakingFormat || 'audio'}
         </p>
       )}
       {/* Student cannot replay speaking recordings during the exam. */}

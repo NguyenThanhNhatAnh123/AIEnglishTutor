@@ -11,7 +11,7 @@ import { PageLoader } from '../components/common/LoadingSpinner';
 import { useToast } from '../context/ToastContext';
 
 function formatExamCreated(value) {
-  if (value == null || value === '') return '—';
+  if (value == null || value === '') return '-';
   if (Array.isArray(value) && value.length >= 3) {
     const [y, mo = 1, d = 1, h = 0, mi = 0, s = 0] = value;
     const dt = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s));
@@ -23,7 +23,7 @@ function formatExamCreated(value) {
   if (!Number.isNaN(d.getTime())) {
     return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   }
-  return '—';
+  return '-';
 }
 
 function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
@@ -251,7 +251,7 @@ export default function ExamManagement() {
     }
   };
 
-  // FIX: use PATCH with only { status } — avoid sending non-ExamRequest fields
+  // Use PATCH with only status to avoid sending display-only fields.
   const handlePublish = async (exam) => {
     try {
       await examApi.patch(exam.id, { status: 'ACTIVE' });
@@ -271,10 +271,41 @@ export default function ExamManagement() {
     const owner = e.teacherName?.toLowerCase() || '';
     return title.includes(q) || desc.includes(q) || owner.includes(q);
   });
+  const manageable = exams.filter((e) => e.canManage !== false);
+  const activeCount = manageable.filter((e) => e.status === 'ACTIVE').length;
+  const draftCount = manageable.filter((e) => e.status === 'DRAFT').length;
+  const readyCount = manageable.filter((e) => (e.sectionCount ?? 0) > 0 && (e.questionCount ?? 0) > 0).length;
+
+  const isReady = (exam) => (exam.sectionCount ?? 0) > 0 && (exam.questionCount ?? 0) > 0;
 
   return (
     <Layout>
       <div className="space-y-5">
+        <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-500">Exam management</p>
+              <h1 className="mt-1 text-2xl font-bold text-slate-900">Teacher exam workspace</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                Build papers, limit attempts, check readiness, then publish to students.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[520px]">
+              {[
+                ['My exams', manageable.length],
+                ['Active', activeCount],
+                ['Draft', draftCount],
+                ['Ready', readyCount],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                  <p className="text-[11px] font-semibold uppercase text-slate-500">{label}</p>
+                  <p className="text-xl font-bold text-blue-700">{value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <svg
@@ -314,7 +345,7 @@ export default function ExamManagement() {
           <div className="space-y-2">
             <p className="text-sm text-slate-500">
               {filtered.length} exam{filtered.length !== 1 ? 's' : ''}
-              {search.trim() ? ` matching “${search.trim()}”` : ''}
+              {search.trim() ? ` matching "${search.trim()}"` : ''}
             </p>
             <div className="card overflow-hidden !p-0 overflow-x-auto">
             <table className="w-full text-sm min-w-[720px]">
@@ -328,7 +359,7 @@ export default function ExamManagement() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Attempts</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Allowed classes</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Duration</th>
-                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Sections</th>
+                  <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Content</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase hidden md:table-cell">
                     Created
                   </th>
@@ -338,6 +369,7 @@ export default function ExamManagement() {
               <tbody className="divide-y divide-slate-50">
                 {filtered.map((e) => {
                   const canManage = e.canManage !== false;
+                  const ready = isReady(e);
                   return (
                   <tr key={e.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 align-top max-w-xs lg:max-w-md">
@@ -379,7 +411,16 @@ export default function ExamManagement() {
                       {e.durationMinutes} min
                     </td>
                     <td className="px-4 py-3 text-center text-slate-600 align-top tabular-nums">
-                      {e.sectionCount != null ? e.sectionCount : '—'}
+                      <div className="inline-flex flex-col items-center gap-1">
+                        <span className="font-semibold text-slate-700">
+                          {e.sectionCount ?? 0} sec / {e.questionCount ?? 0} q
+                        </span>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          ready ? 'bg-blue-50 text-blue-700' : 'bg-red-50 text-red-600'
+                        }`}>
+                          {ready ? 'Ready' : 'Needs content'}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-slate-500 text-xs align-top whitespace-nowrap hidden md:table-cell">
                       {formatExamCreated(e.createdAt)}
@@ -387,7 +428,13 @@ export default function ExamManagement() {
                     <td className="px-4 py-3 text-right align-top">
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         {canManage && e.status === 'DRAFT' && (
-                          <Button variant="ghost" size="sm" onClick={() => handlePublish(e)}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handlePublish(e)}
+                            disabled={!ready}
+                            title={ready ? 'Publish this exam' : 'Add sections and questions before publishing'}
+                          >
                             Publish
                           </Button>
                         )}
@@ -419,7 +466,7 @@ export default function ExamManagement() {
                           </Button>
                         )}
                         {!canManage && (
-                          <span className="text-xs text-slate-400">—</span>
+                          <span className="text-xs text-slate-400">-</span>
                         )}
                       </div>
                     </td>

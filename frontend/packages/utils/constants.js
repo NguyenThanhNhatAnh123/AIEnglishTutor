@@ -1,6 +1,12 @@
 // ─── API ────────────────────────────────────────────────────────────────────
-export const API_ORIGIN = 'http://localhost:8080';
-export const API_BASE_URL = `${API_ORIGIN}/api`;
+const runtimeOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080';
+const defaultOrigin = import.meta.env.DEV ? 'http://localhost:8080' : runtimeOrigin;
+const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '';
+const configuredOrigin = import.meta.env.VITE_API_ORIGIN || '';
+
+export const API_ORIGIN = (configuredOrigin || configuredBaseUrl.replace(/\/api\/?$/, '') || defaultOrigin).replace(/\/$/, '');
+export const API_BASE_URL = (configuredBaseUrl || `${API_ORIGIN}/api`).replace(/\/$/, '');
+export const APP_BASE_PATH = (import.meta.env.VITE_BASE_PATH || '').replace(/\/$/, '');
 
 // ─── App ports ───────────────────────────────────────────────────────────────
 export const STUDENT_PORT  = 5173;

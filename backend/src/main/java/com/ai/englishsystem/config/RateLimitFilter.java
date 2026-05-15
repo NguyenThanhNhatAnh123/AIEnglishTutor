@@ -53,6 +53,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final StringRedisTemplate redisTemplate;
     private final AtomicBoolean redisFallbackLogged = new AtomicBoolean(false);
     private final Map<String, WindowCounter> memoryCounters = new ConcurrentHashMap<>();
+    private volatile long redisBackendDisabledUntilMs = 0L;
 
     public RateLimitFilter(ObjectProvider<StringRedisTemplate> redisTemplateProvider) {
         this.redisTemplate = redisTemplateProvider.getIfAvailable();
@@ -140,6 +141,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             }
             return count > maxRequests;
         } catch (Exception ex) {
+            redisBackendDisabledUntilMs = System.currentTimeMillis() + 30_000L;
             if (redisFallbackLogged.compareAndSet(false, true)) {
                 log.warn("Redis rate-limit backend failed. Falling back to in-memory counters.", ex);
             }
@@ -174,7 +176,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private boolean useRedisBackend() {
-        return "redis".equalsIgnoreCase(rateLimitBackend) && redisTemplate != null;
+        if (!"redis".equalsIgnoreCase(rateLimitBackend) || redisTemplate == null) {
+            return false;
+        }
+        return System.currentTimeMillis() >= redisBackendDisabledUntilMs;
     }
 
     private String maskKey(String key) {

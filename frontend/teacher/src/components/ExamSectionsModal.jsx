@@ -8,7 +8,7 @@ import { useToast } from '../context/ToastContext';
 import { PageLoader } from './common/LoadingSpinner';
 
 /**
- * Manage exam sections (name, order, add/delete) — mirrors how students see the paper by section.
+ * Manage exam sections (name, order, add/delete) in the same order students see the paper.
  */
 export default function ExamSectionsModal({ examId, examTitle, onChanged }) {
   const [sections, setSections] = useState([]);
@@ -55,7 +55,15 @@ export default function ExamSectionsModal({ examId, examTitle, onChanged }) {
     try {
       const payload = { name, sectionType: newSectionType };
       const o = newOrder.trim();
-      if (o !== '') payload.orderIndex = parseInt(o, 10);
+      if (o !== '') {
+        const orderIndex = parseInt(o, 10);
+        if (!Number.isFinite(orderIndex)) {
+          toast.error('Order must be a valid number.');
+          setCreating(false);
+          return;
+        }
+        payload.orderIndex = orderIndex;
+      }
       await examSectionApi.create(examId, payload);
       toast.success('Section added.');
       setNewName('');
@@ -93,7 +101,15 @@ export default function ExamSectionsModal({ examId, examTitle, onChanged }) {
       if (name) payload.name = name;
       if (editSectionType) payload.sectionType = editSectionType;
       const o = editOrder.trim();
-      if (o !== '') payload.orderIndex = parseInt(o, 10);
+      if (o !== '') {
+        const orderIndex = parseInt(o, 10);
+        if (!Number.isFinite(orderIndex)) {
+          toast.error('Order must be a valid number.');
+          setSavingId(null);
+          return;
+        }
+        payload.orderIndex = orderIndex;
+      }
       if (Object.keys(payload).length === 0) {
         toast.error('Change the name, type, or order before saving.');
         setSavingId(null);
@@ -207,8 +223,8 @@ export default function ExamSectionsModal({ examId, examTitle, onChanged }) {
                     </>
                   ) : (
                     <>
-                      <td className="px-3 py-2.5 text-slate-600 tabular-nums">{s.orderIndex ?? '—'}</td>
-                      <td className="px-3 py-2.5 text-slate-600 text-xs font-semibold">{s.sectionType || '—'}</td>
+                      <td className="px-3 py-2.5 text-slate-600 tabular-nums">{s.orderIndex ?? '-'}</td>
+                      <td className="px-3 py-2.5 text-slate-600 text-xs font-semibold">{s.sectionType || '-'}</td>
                       <td className="px-3 py-2.5 font-medium text-slate-800">{s.name}</td>
                       <td className="px-3 py-2.5 text-center text-slate-600">{s.questionCount ?? 0}</td>
                       <td className="px-3 py-2.5 text-right whitespace-nowrap">
@@ -255,7 +271,7 @@ export default function ExamSectionsModal({ examId, examTitle, onChanged }) {
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="e.g. Part 1 — Reading"
+              placeholder="e.g. Part 1 - Reading"
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-sky-300"
             />
           </div>

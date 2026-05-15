@@ -149,6 +149,7 @@ public class ExamService {
         exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds()));
 
         exam = examRepository.save(exam);
+        assertReadyToPublishIfActive(exam);
 
         return toResponse(exam);
     }
@@ -182,6 +183,7 @@ public class ExamService {
             exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds()));
         }
 
+        assertReadyToPublishIfActive(exam);
         exam = examRepository.save(exam);
         return toResponseWithSections(exam);
     }
@@ -217,6 +219,7 @@ public class ExamService {
             exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds()));
         }
 
+        assertReadyToPublishIfActive(exam);
         exam = examRepository.save(exam);
         return toResponseWithSections(exam);
     }
@@ -404,6 +407,24 @@ public class ExamService {
         return null;
     }
 
+    private void assertReadyToPublishIfActive(Exam exam) {
+        if (!"ACTIVE".equalsIgnoreCase(exam.getStatus())) {
+            return;
+        }
+        List<ExamSection> sections = exam.getSections() != null ? exam.getSections() : List.of();
+        if (sections.isEmpty()) {
+            throw new BadRequestException("Add at least one section before publishing this exam");
+        }
+        List<String> emptySections = sections.stream()
+                .filter(section -> section.getQuestions() == null || section.getQuestions().isEmpty())
+                .map(ExamSection::getName)
+                .toList();
+        if (!emptySections.isEmpty()) {
+            throw new BadRequestException("Add at least one question to every section before publishing: "
+                    + String.join(", ", emptySections));
+        }
+    }
+
     private List<ClassEntity> resolveAllowedClassesForWrite(List<Integer> allowedClassIds) {
         if (allowedClassIds == null) {
             return new ArrayList<>();
@@ -472,6 +493,7 @@ public class ExamService {
                 .createdAt(exam.getCreatedAt());
         if (Hibernate.isInitialized(exam.getSections())) {
             b.sectionCount(exam.getSections() != null ? exam.getSections().size() : 0);
+            b.questionCount(questionCount(exam));
         }
         if (Hibernate.isInitialized(exam.getAllowedClasses())) {
             b.allowedClasses(exam.getAllowedClasses().stream()
@@ -548,8 +570,20 @@ public class ExamService {
     private void initializeListResponseAssociations(List<Exam> exams) {
         exams.forEach(exam -> {
             Hibernate.initialize(exam.getSections());
+            for (ExamSection section : exam.getSections()) {
+                Hibernate.initialize(section.getQuestions());
+            }
             Hibernate.initialize(exam.getAllowedClasses());
         });
+    }
+
+    private int questionCount(Exam exam) {
+        if (exam.getSections() == null) {
+            return 0;
+        }
+        return exam.getSections().stream()
+                .mapToInt(section -> section.getQuestions() != null ? section.getQuestions().size() : 0)
+                .sum();
     }
 
     private void initializeDetailAssociations(Exam exam) {

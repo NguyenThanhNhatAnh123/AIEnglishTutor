@@ -25,6 +25,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -33,10 +34,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * AI scoring (mock in production bootstrap; swap for real LLM / speech APIs later).
+ * AI scoring backed by configured provider APIs.
  * Idempotent per answer: existing {@link AiResult} rows are reused.
  */
 @Service
@@ -86,6 +86,9 @@ public class AiScoringService {
     @Value("${app.ai.http.request-timeout-seconds:120}")
     private int httpRequestTimeoutSeconds;
 
+    @Value("${app.ai.http.total-timeout-seconds:170}")
+    private int httpTotalTimeoutSeconds;
+
     /** Shared, reusable HttpClient instance (created once, reused across calls). */
     private volatile HttpClient sharedHttpClient;
 
@@ -108,6 +111,10 @@ public class AiScoringService {
     }
 
     public AiScoreResponse scoreWriting(WritingScoreRequest request, boolean forceRescore) {
+        return scoreWriting(request, forceRescore, null);
+    }
+
+    public AiScoreResponse scoreWriting(WritingScoreRequest request, boolean forceRescore, Instant deadlineAt) {
         Answer answer = answerRepository.findWithSubmissionGraphById(request.getAnswerId())
                 .orElseThrow(() -> new NotFoundException("Answer", request.getAnswerId()));
         assertCanScoreAnswer(answer);
@@ -129,7 +136,12 @@ public class AiScoringService {
         String feedback;
 
         try {
-            AiRubric deepSeek = scoreWithDeepSeek(answer, AiScoringType.WRITING, buildWritingPrompt(text, request.getCustomPrompt()));
+            AiRubric deepSeek = scoreWithDeepSeek(
+                    answer,
+                    AiScoringType.WRITING,
+                    buildWritingPrompt(text, request.getCustomPrompt()),
+                    deadlineAt
+            );
             overall = deepSeek.overallScore();
             grammarScore = deepSeek.grammarScore();
             vocabularyScore = deepSeek.vocabularyScore();
@@ -141,17 +153,11 @@ public class AiScoringService {
                     deepSeek.advancedTips()
             );
         } catch (Exception e) {
-            log.warn("DeepSeek writing scoring fallback for answer {}: {}", answer.getId(), e.getMessage());
-            overall = mockOverall6To9();
-            grammarScore = jitterAround(overall);
-            vocabularyScore = jitterAround(overall);
-            coherenceScore = jitterAround(overall);
-            feedback = enrichWritingFeedback(
-                    buildWritingFeedback(grammarScore, vocabularyScore, coherenceScore, overall),
-                    defaultWritingMistakes(grammarScore, vocabularyScore, coherenceScore),
-                    defaultWritingChanges(grammarScore, vocabularyScore, coherenceScore),
-                    defaultWritingAdvancedTips(overall)
-            );
+            log.warn("DeepSeek writing scoring failed for answer {}: {}", answer.getId(), e.getMessage());
+            if (isTimeoutError(e)) {
+                throw new BadRequestException("AI writing scoring timed out. Please retry or shorten the prompt/text.");
+            }
+            throw new BadRequestException("AI writing scoring is unavailable. Please retry later or score this answer manually.");
         }
 
         AiResult aiResult = existingWriting.orElseGet(() -> AiResult.builder().answer(answer).build());
@@ -171,6 +177,10 @@ public class AiScoringService {
     }
 
     public AiScoreResponse scoreSpeaking(SpeakingScoreRequest request, boolean forceRescore) {
+        return scoreSpeaking(request, forceRescore, null);
+    }
+
+    public AiScoreResponse scoreSpeaking(SpeakingScoreRequest request, boolean forceRescore, Instant deadlineAt) {
         Answer answer = answerRepository.findWithSubmissionGraphById(request.getAnswerId())
                 .orElseThrow(() -> new NotFoundException("Answer", request.getAnswerId()));
         assertCanScoreAnswer(answer);
@@ -196,7 +206,8 @@ public class AiScoringService {
             AiRubric deepSeek = scoreWithDeepSeek(
                     answer,
                     AiScoringType.SPEAKING,
-                    buildSpeakingPrompt(transcriptText, audioUrl, request.getCustomPrompt())
+                    buildSpeakingPrompt(transcriptText, audioUrl, request.getCustomPrompt()),
+                    deadlineAt
             );
             overall = deepSeek.overallScore();
             pronunciationScore = deepSeek.pronunciationScore();
@@ -209,17 +220,11 @@ public class AiScoringService {
                     deepSeek.advancedTips()
             );
         } catch (Exception e) {
-            log.warn("DeepSeek speaking scoring fallback for answer {}: {}", answer.getId(), e.getMessage());
-            overall = mockOverall6To9();
-            pronunciationScore = jitterAround(overall);
-            fluencyScore = jitterAround(overall);
-            grammarScore = jitterAround(overall);
-            feedback = enrichSpeakingFeedback(
-                    buildSpeakingFeedback(pronunciationScore, fluencyScore, grammarScore, overall),
-                    defaultSpeakingMistakes(pronunciationScore, fluencyScore, grammarScore),
-                    defaultSpeakingChanges(pronunciationScore, fluencyScore, grammarScore),
-                    defaultSpeakingAdvancedTips(overall)
-            );
+            log.warn("DeepSeek speaking scoring failed for answer {}: {}", answer.getId(), e.getMessage());
+            if (isTimeoutError(e)) {
+                throw new BadRequestException("AI speaking scoring timed out. Please retry or shorten the audio/transcript.");
+            }
+            throw new BadRequestException("AI speaking scoring is unavailable. Please retry later or score this answer manually.");
         }
 
         AiResult aiResult = existingSpeaking.orElseGet(() -> AiResult.builder().answer(answer).build());
@@ -235,14 +240,22 @@ public class AiScoringService {
     }
 
     public String transcribeSpeakingAudio(Path audioPath, String language) {
+        return transcribeSpeakingAudio(audioPath, language, newDeadline());
+    }
+
+    public String transcribeSpeakingAudio(Path audioPath, String language, Instant deadlineAt) {
         if (audioPath == null || !Files.exists(audioPath)) {
             throw new BadRequestException("Speaking audio file not found for transcription");
         }
         String transcript = null;
 
+        if (!hasBudgetLeft(deadlineAt)) {
+            return null;
+        }
+
         // Primary: local Whisper (aiservice /transcribe)
         try {
-            transcript = transcribeWithLocalTranscribe(audioPath, language);
+            transcript = transcribeWithLocalTranscribe(audioPath, language, deadlineAt);
         } catch (Exception e) {
             log.warn("Local Whisper transcription failed for {}: {}", audioPath, e.getMessage());
         }
@@ -250,9 +263,13 @@ public class AiScoringService {
             return transcript.trim();
         }
 
+        if (!hasBudgetLeft(deadlineAt)) {
+            return null;
+        }
+
         // Optional: DeepSeek when API key is configured
         try {
-            transcript = transcribeWithDeepSeek(audioPath, language);
+            transcript = transcribeWithDeepSeek(audioPath, language, deadlineAt);
         } catch (Exception e) {
             log.warn("DeepSeek transcription failed for {}: {}", audioPath, e.getMessage());
         }
@@ -260,9 +277,13 @@ public class AiScoringService {
             return transcript.trim();
         }
 
+        if (!hasBudgetLeft(deadlineAt)) {
+            return null;
+        }
+
         // Optional: OpenAI-compatible Whisper when API key is configured
         try {
-            transcript = transcribeWithOpenAIWhisper(audioPath, language);
+            transcript = transcribeWithOpenAIWhisper(audioPath, language, deadlineAt);
         } catch (Exception e) {
             log.warn("OpenAI Whisper transcription failed for {}: {}", audioPath, e.getMessage());
         }
@@ -270,7 +291,7 @@ public class AiScoringService {
         return hasText(transcript) ? transcript.trim() : null;
     }
 
-    private String transcribeWithLocalTranscribe(Path audioPath, String language) throws Exception {
+    private String transcribeWithLocalTranscribe(Path audioPath, String language, Instant deadlineAt) throws Exception {
         String base = resolveLocalTranscribeBaseUrl();
         if (base == null || base.isBlank()) {
             return null;
@@ -329,7 +350,7 @@ public class AiScoringService {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint))
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
+                .timeout(resolveRequestTimeout(deadlineAt))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
@@ -343,17 +364,6 @@ public class AiScoringService {
         JsonNode root = objectMapper.readTree(response.body());
         String text = root.path("text").asText(null);
         return hasText(text) ? text.trim() : null;
-    }
-
-    /** Mock band ~6–9 on a 0–10 scale (production: replace with model output). */
-    private static float mockOverall6To9() {
-        ThreadLocalRandom r = ThreadLocalRandom.current();
-        return 6f + r.nextFloat() * 3f;
-    }
-
-    private static float jitterAround(float center) {
-        float d = (ThreadLocalRandom.current().nextFloat() - 0.5f) * 1.2f;
-        return clamp10(center + d);
     }
 
     private static float clamp10(float v) {
@@ -406,27 +416,12 @@ public class AiScoringService {
                 .build();
     }
 
-    private String buildWritingFeedback(float g, float v, float c, float o) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Overall: %.1f/10. ", o));
-        if (g < 6) sb.append("Improve grammar and sentence structure. ");
-        if (v < 6) sb.append("Use more varied vocabulary. ");
-        if (c < 6) sb.append("Enhance essay coherence and flow. ");
-        if (o >= 8) sb.append("Excellent work!");
-        return sb.toString().trim();
-    }
-
-    private String buildSpeakingFeedback(float p, float f, float g, float o) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Overall: %.1f/10. ", o));
-        if (p < 6) sb.append("Practice pronunciation. ");
-        if (f < 6) sb.append("Work on fluency and pacing. ");
-        if (g < 6) sb.append("Focus on grammatical accuracy. ");
-        if (o >= 8) sb.append("Well done!");
-        return sb.toString().trim();
-    }
-
-    private AiRubric scoreWithDeepSeek(Answer answer, AiScoringType scoringType, String userPrompt) throws Exception {
+    private AiRubric scoreWithDeepSeek(
+            Answer answer,
+            AiScoringType scoringType,
+            String userPrompt,
+            Instant deadlineAt
+    ) throws Exception {
         if (deepSeekApiKey == null || deepSeekApiKey.isBlank()) {
             throw new IllegalStateException("DeepSeek API key is not configured");
         }
@@ -453,7 +448,7 @@ public class AiScoringService {
                 .uri(URI.create(endpoint))
                 .header("Authorization", "Bearer " + deepSeekApiKey)
                 .header("Content-Type", "application/json")
-                .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
+                .timeout(resolveRequestTimeout(deadlineAt))
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build();
 
@@ -652,7 +647,7 @@ public class AiScoringService {
         return tips;
     }
 
-    private String transcribeWithDeepSeek(Path audioPath, String language) throws Exception {
+    private String transcribeWithDeepSeek(Path audioPath, String language, Instant deadlineAt) throws Exception {
         if (deepSeekApiKey == null || deepSeekApiKey.isBlank()) {
             throw new IllegalStateException("DeepSeek API key is not configured");
         }
@@ -672,7 +667,7 @@ public class AiScoringService {
                     .uri(URI.create(endpoint))
                     .header("Authorization", "Bearer " + deepSeekApiKey)
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
+                    .timeout(resolveRequestTimeout(deadlineAt))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                     .build();
 
@@ -693,7 +688,7 @@ public class AiScoringService {
         throw new IllegalStateException(lastError != null ? lastError : "DeepSeek transcription API unavailable");
     }
 
-    private String transcribeWithOpenAIWhisper(Path audioPath, String language) throws Exception {
+    private String transcribeWithOpenAIWhisper(Path audioPath, String language, Instant deadlineAt) throws Exception {
         if (whisperApiKey == null || whisperApiKey.isBlank()) {
             throw new IllegalStateException("Whisper API key is not configured (app.ai.whisper.api-key)");
         }
@@ -717,7 +712,7 @@ public class AiScoringService {
                 .uri(URI.create(endpoint))
                 .header("Authorization", "Bearer " + whisperApiKey)
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
+                .timeout(resolveRequestTimeout(deadlineAt))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
@@ -893,6 +888,41 @@ public class AiScoringService {
             return base.substring(0, base.length() - 1);
         }
         return base;
+    }
+
+    private Instant newDeadline() {
+        return Instant.now().plusSeconds(Math.max(30, httpTotalTimeoutSeconds));
+    }
+
+    private static boolean hasBudgetLeft(Instant deadlineAt) {
+        return deadlineAt == null || Instant.now().isBefore(deadlineAt);
+    }
+
+    private Duration resolveRequestTimeout(Instant deadlineAt) {
+        long perRequestMs = Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)).toMillis();
+        if (deadlineAt == null) {
+            return Duration.ofMillis(perRequestMs);
+        }
+        long remainingMs = Duration.between(Instant.now(), deadlineAt).toMillis();
+        if (remainingMs <= 1000) {
+            throw new BadRequestException("AI timeout budget exhausted");
+        }
+        return Duration.ofMillis(Math.max(1000, Math.min(perRequestMs, remainingMs)));
+    }
+
+    private static boolean isTimeoutError(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof HttpTimeoutException) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null && message.toLowerCase().contains("timed out")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     @lombok.Builder

@@ -7,6 +7,7 @@ public enum DetectedAudioFormat {
     MP3,
     WAV,
     WEBM,
+    MP4,
     OGG,
     UNKNOWN
 }

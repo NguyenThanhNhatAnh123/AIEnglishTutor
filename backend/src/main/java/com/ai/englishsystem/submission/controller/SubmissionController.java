@@ -60,9 +60,9 @@ public class SubmissionController {
         return ResponseEntity.ok(ApiResponse.success(map));
     }
 
-    /** Teacher/Admin: download normalized speaking MP3 (requires exam ownership). */
+    /** Teacher/Admin/Student: stream normalized speaking MP3 (ownership enforced in service). */
     @GetMapping("/{submissionId}/answers/{answerId}/speaking")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN', 'STUDENT')")
     public ResponseEntity<Resource> downloadSpeaking(
             @PathVariable Integer submissionId,
             @PathVariable Integer answerId) {

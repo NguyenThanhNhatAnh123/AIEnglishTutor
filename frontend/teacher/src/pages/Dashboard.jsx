@@ -6,17 +6,17 @@ import { PageLoader } from '../components/common/LoadingSpinner';
 
 function StatCard({ label, value, hint, tone = 'slate' }) {
   const toneMap = {
-    slate: 'bg-slate-50 border-slate-200 text-slate-700',
-    blue: 'bg-blue-50 border-blue-200 text-blue-700',
-    emerald: 'bg-emerald-50 border-emerald-200 text-emerald-700',
-    amber: 'bg-amber-50 border-amber-200 text-amber-700',
-    violet: 'bg-violet-50 border-violet-200 text-violet-700',
-    rose: 'bg-rose-50 border-rose-200 text-rose-700',
+    slate: 'bg-white border-slate-200 text-slate-800',
+    blue: 'bg-blue-50 border-blue-200 text-blue-800',
+    emerald: 'bg-emerald-50 border-emerald-200 text-emerald-800',
+    amber: 'bg-amber-50 border-amber-200 text-amber-800',
+    violet: 'bg-violet-50 border-violet-200 text-violet-800',
+    rose: 'bg-rose-50 border-rose-200 text-rose-800',
   };
   return (
-    <div className={`rounded-xl border p-4 ${toneMap[tone] || toneMap.slate}`}>
+    <div className={`rounded-2xl border p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneMap[tone] || toneMap.slate}`}>
       <p className="text-xs uppercase tracking-wide font-semibold opacity-80">{label}</p>
-      <p className="text-2xl font-bold mt-2">{value}</p>
+      <p className="text-3xl font-extrabold mt-2">{value}</p>
       {hint && <p className="text-xs mt-1 opacity-80">{hint}</p>}
     </div>
   );
@@ -166,16 +166,19 @@ export default function Dashboard() {
   return (
     <Layout>
       <div className="space-y-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="rounded-2xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs uppercase tracking-wide font-semibold text-slate-500">Teacher Analytics</p>
-              <h2 className="text-2xl font-bold text-slate-800 mt-1">Teaching Overview</h2>
+              <p className="text-xs uppercase tracking-wide font-bold text-blue-200">Teacher analytics</p>
+              <h2 className="mt-2 text-3xl font-extrabold">Teaching overview</h2>
+              <p className="mt-2 max-w-2xl text-sm text-slate-300">
+                Monitor submissions, grading workload, score quality, and exam health in one workspace.
+              </p>
             </div>
-            <div className="flex items-center gap-3 text-sm">
-              <Link to="/results" className="text-blue-600 hover:underline">Results</Link>
-              <Link to="/exams" className="text-blue-600 hover:underline">Exams</Link>
-              <Link to="/questions" className="text-blue-600 hover:underline">Question Bank</Link>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Link to="/results" className="rounded-xl bg-white px-4 py-2 font-bold text-slate-900 transition hover:bg-blue-50">Results</Link>
+              <Link to="/exams" className="rounded-xl border border-white/20 px-4 py-2 font-bold text-white transition hover:bg-white/10">Exams</Link>
+              <Link to="/questions" className="rounded-xl border border-white/20 px-4 py-2 font-bold text-white transition hover:bg-white/10">Question bank</Link>
             </div>
           </div>
         </div>

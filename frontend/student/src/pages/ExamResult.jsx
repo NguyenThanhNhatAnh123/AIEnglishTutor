@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { scoreApi, studentExamApi, submissionApi, API_ORIGIN } from '../services/api';
 import AudioPlayer from '../../../packages/ui/AudioPlayer.jsx';
+import SpeakingAudioPlayer from '../components/exam/SpeakingAudioPlayer.jsx';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import Badge from '../components/common/Badge';
 
@@ -17,6 +18,30 @@ const AWAITING_REVIEW =
 function formatScore(v) {
   if (v == null || Number.isNaN(v)) return 'N/A';
   return String(Math.round(v * 10) / 10);
+}
+
+function ReviewCard({ title, score, published, message, children }) {
+  return (
+    <div className={`rounded-2xl border p-5 shadow-sm ${
+      published ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/80'
+    }`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</p>
+          <p className={`mt-1 text-sm font-semibold ${published ? 'text-emerald-800' : 'text-amber-800'}`}>
+            {published ? 'Published by teacher' : 'Waiting for teacher publication'}
+          </p>
+        </div>
+        <div className="rounded-xl bg-white px-4 py-2 text-right shadow-sm ring-1 ring-slate-100">
+          <p className="text-[11px] font-semibold uppercase text-slate-400">Score</p>
+          <p className="text-xl font-extrabold text-slate-900">{formatScore(score)}</p>
+        </div>
+      </div>
+      <div className="mt-4 text-sm leading-relaxed text-slate-700 whitespace-pre-line">
+        {published ? children : (message || AWAITING_REVIEW)}
+      </div>
+    </div>
+  );
 }
 
 export default function ExamResult() {
@@ -77,11 +102,14 @@ export default function ExamResult() {
   const totalLabel = totalVisible != null ? formatScore(totalVisible) : 'N/A';
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 pb-10">
-      <div className="card bg-gradient-to-r from-blue-700 to-blue-500 text-white !p-8 space-y-3">
-        <p className="text-blue-200 text-xs font-semibold uppercase tracking-wider">Submission</p>
-        <h1 className="text-2xl font-bold leading-tight">{examTitle}</h1>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
+    <div className="mx-auto max-w-5xl space-y-6 pb-10">
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="bg-slate-950 px-6 py-7 text-white sm:px-8">
+          <p className="text-xs font-bold uppercase tracking-wide text-blue-200">Submission review</p>
+          <div className="mt-2 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h1 className="text-2xl font-extrabold leading-tight sm:text-3xl">{examTitle}</h1>
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           {submission?.status && <Badge status={submission.status} label={submission.status} />}
           {submission?.examType && (
             <span
@@ -92,105 +120,119 @@ export default function ExamResult() {
               {submission.examType === 'OFFICIAL' ? 'Official' : 'Practice'}
             </span>
           )}
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-white/20 text-sm">
-          <div>
-            <p className="text-blue-200 text-xs">Total score</p>
-            <p className="text-xl font-bold">{totalLabel}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl bg-white px-5 py-4 text-slate-950 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Total score</p>
+              <p className="mt-1 text-4xl font-extrabold">{totalLabel}</p>
+            </div>
           </div>
+        </div>
+        <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
           {score?.mcScore != null && (
-            <div>
-              <p className="text-blue-200 text-xs">MC / auto</p>
-              <p className="text-lg font-semibold">{formatScore(score.mcScore)}</p>
+            <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">MC / auto</p>
+              <p className="mt-2 text-2xl font-extrabold text-slate-900">{formatScore(score.mcScore)}</p>
             </div>
           )}
+          <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-amber-700">Events</p>
+            <p className="mt-2 text-2xl font-extrabold text-amber-800">{score?.suspiciousEventCount ?? 0}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-emerald-700">Answers</p>
+            <p className="mt-2 text-2xl font-extrabold text-emerald-800">{sortedAnswers.length}</p>
+          </div>
+          <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-blue-700">Review state</p>
+            <p className="mt-2 text-sm font-bold text-blue-900">
+              {totalVisible != null ? 'Visible' : 'Pending'}
+            </p>
+          </div>
         </div>
-        <p className="text-blue-100 text-xs leading-relaxed">
-          Proctoring summary below lists unusual events during the exam (tab switches, focus loss, copy/paste). It does
-          not grade your answers.
-        </p>
       </div>
 
       {score && (
         <>
-          <h2 className="section-title">Proctoring summary</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="card">
-              <p className="text-sm text-slate-500">Suspicious events</p>
-              <p className="text-3xl font-extrabold text-amber-600 mt-1">{score.suspiciousEventCount ?? 0}</p>
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-extrabold text-slate-900">Session integrity</h2>
+                <p className="text-sm text-slate-500">Activity markers recorded during the exam session.</p>
+              </div>
+              <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                Number(score.suspiciousEventCount || 0) > 0
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-emerald-100 text-emerald-800'
+              }`}>
+                {Number(score.suspiciousEventCount || 0) > 0 ? 'Needs review' : 'Clean session'}
+              </span>
             </div>
-            <div className="card">
-              <p className="text-sm text-slate-500">Tab switches</p>
-              <p className="text-3xl font-extrabold text-slate-700 mt-1">{score.tabSwitchCount ?? 0}</p>
+            <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {[
+                ['Suspicious events', score.suspiciousEventCount ?? 0],
+                ['Tab switches', score.tabSwitchCount ?? 0],
+                ['Focus loss', score.focusLossCount ?? 0],
+                ['Copy / paste', score.copyPasteCount ?? 0],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl bg-slate-50 p-4">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                  <p className="mt-2 text-2xl font-extrabold text-slate-900">{value}</p>
+                </div>
+              ))}
             </div>
-            <div className="card">
-              <p className="text-sm text-slate-500">Focus loss</p>
-              <p className="text-3xl font-extrabold text-slate-700 mt-1">{score.focusLossCount ?? 0}</p>
-            </div>
-            <div className="card">
-              <p className="text-sm text-slate-500">Copy / paste attempts</p>
-              <p className="text-3xl font-extrabold text-slate-700 mt-1">{score.copyPasteCount ?? 0}</p>
-            </div>
-          </div>
+          </section>
 
           {score.writingReviewStatus && score.writingReviewStatus !== 'NOT_REQUIRED' && (
-            <div className="card space-y-3">
-              <h3 className="section-title !mb-0">Writing review</h3>
-              {!score.writingReviewPublished ? (
-                <p className="text-sm text-amber-800 font-medium">{score.writingReviewMessage || AWAITING_REVIEW}</p>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-sm text-slate-600">
-                    Writing score:{' '}
-                    <span className="font-bold text-slate-900">{formatScore(score.writingScore)}</span>
-                  </p>
-                  {score.feedback && (
-                    <p className="text-sm text-slate-700 whitespace-pre-line">{score.feedback}</p>
-                  )}
-                </div>
-              )}
-            </div>
+            <ReviewCard
+              title="Writing review"
+              score={score.writingScore}
+              published={score.writingReviewPublished}
+              message={score.writingReviewMessage}
+            >
+              {score.feedback || 'Teacher has published your writing score.'}
+            </ReviewCard>
           )}
 
           {score.speakingReviewStatus && score.speakingReviewStatus !== 'NOT_REQUIRED' && (
-            <div className="card space-y-3">
-              <h3 className="section-title !mb-0">Speaking review</h3>
-              {!score.speakingReviewPublished ? (
-                <p className="text-sm text-amber-800 font-medium">{score.speakingReviewMessage || AWAITING_REVIEW}</p>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-sm text-slate-600">
-                    Speaking score:{' '}
-                    <span className="font-bold text-slate-900">{formatScore(score.speakingScore)}</span>
-                  </p>
-                </div>
-              )}
-            </div>
+            <ReviewCard
+              title="Speaking review"
+              score={score.speakingScore}
+              published={score.speakingReviewPublished}
+              message={score.speakingReviewMessage}
+            >
+              Teacher has published your speaking score.
+            </ReviewCard>
           )}
         </>
       )}
 
       <div>
-        <h2 className="section-title">Your answers</h2>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-extrabold text-slate-900">Answer breakdown</h2>
+            <p className="text-sm text-slate-500">Your saved responses and teacher-published feedback.</p>
+          </div>
+        </div>
         {sortedAnswers.length === 0 ? (
           <p className="text-sm text-slate-500">No saved answers for this submission.</p>
         ) : (
-          <div className="space-y-4">
+          <div className="grid gap-4">
             {sortedAnswers.map((a) => (
-              <div key={a.id ?? `${a.questionId}`} className="card space-y-3 !p-5">
+              <div key={a.id ?? `${a.questionId}`} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
-                    <p className="text-[10px] font-bold uppercase text-slate-400 tracking-wide">
+                    <p className="text-[11px] font-bold uppercase text-blue-600 tracking-wide">
                       {a.questionType || 'Question'}
                     </p>
-                    <p className="text-slate-900 font-medium text-sm mt-1">{a.questionText || `Question #${a.questionId}`}</p>
+                    <p className="text-slate-900 font-bold text-sm mt-1">{a.questionText || `Question #${a.questionId}`}</p>
                   </div>
                 </div>
 
                 {a.questionType?.toUpperCase() === 'SPEAKING' && (
                   <div className="space-y-2">
                     {a.speakingAudioUrl && (
-                      <AudioPlayer src={resolveMediaUrl(a.speakingAudioUrl)} className="max-w-md" />
+                      <SpeakingAudioPlayer submissionId={submission?.id} answerId={a.id} className="max-w-md" />
                     )}
                     {a.speakingPublishedTranscript && (
                       <div>
@@ -199,7 +241,7 @@ export default function ExamResult() {
                       </div>
                     )}
                     {(a.speakingPublishedScore != null || a.speakingPublishedFeedback || a.speakingPublishedTranscript) ? (
-                      <div className="text-xs text-slate-600">
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-slate-700">
                         {a.speakingPublishedScore != null && (
                           <p>
                             Published score:{' '}
@@ -226,12 +268,12 @@ export default function ExamResult() {
                       />
                     )}
                     {a.answerText && (
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap border border-slate-100 rounded-lg p-3 bg-slate-50">
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap border border-slate-200 rounded-xl p-4 bg-slate-50">
                         {a.answerText}
                       </p>
                     )}
                     {(a.writingPublishedScore != null || a.writingPublishedFeedback) ? (
-                      <div className="text-xs text-slate-600">
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-slate-700">
                         {a.writingPublishedScore != null && (
                           <p>
                             Published score:{' '}
@@ -250,14 +292,16 @@ export default function ExamResult() {
 
                 {['MULTIPLE_CHOICE', 'LISTENING'].includes(String(a.questionType || '').toUpperCase()) && (
                   <p className="text-sm text-slate-700">
-                    Selected option ID:{' '}
-                    <span className="font-mono">{a.selectedOptionId != null ? a.selectedOptionId : '—'}</span>
+                    Selected answer:{' '}
+                    <span className="font-semibold">
+                      {a.selectedOptionText || (a.selectedOptionId != null ? `Option #${a.selectedOptionId}` : '-')}
+                    </span>
                   </p>
                 )}
 
                 {a.questionType &&
                   !['SPEAKING', 'WRITING', 'MULTIPLE_CHOICE', 'LISTENING'].includes(a.questionType.toUpperCase()) && (
-                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{a.answerText || '—'}</p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">{a.answerText || '-'}</p>
                   )}
               </div>
             ))}

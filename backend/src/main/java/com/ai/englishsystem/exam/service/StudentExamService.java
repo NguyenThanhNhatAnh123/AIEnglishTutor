@@ -68,6 +68,7 @@ public class StudentExamService {
         Student student = resolveCurrentStudent();
         return examRepository.findByStatusWithTeacher("ACTIVE").stream()
                 .filter(exam -> canStudentAccessExam(student, exam))
+                .filter(this::isReadyForTaking)
                 .map(exam -> ExamResponse.builder()
                         .id(exam.getId())
                         .title(exam.getTitle())
@@ -78,6 +79,11 @@ public class StudentExamService {
                         .status(exam.getStatus())
                         .examType(exam.getExamType() != null ? exam.getExamType().name() : ExamType.PRACTICE.name())
                         .maxAttempts(exam.getMaxAttempts())
+                        .completedAttempts(completedAttempts(exam, student))
+                        .remainingAttempts(remainingAttempts(exam, student))
+                        .hasInProgressSubmission(hasInProgressSubmission(exam, student))
+                        .sectionCount(sectionsOf(exam).size())
+                        .questionCount(questionCount(exam))
                         .createdAt(exam.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
@@ -90,6 +96,7 @@ public class StudentExamService {
                 .orElseThrow(() -> new NotFoundException("Exam", examId));
 
         assertExamAvailable(exam);
+        assertReadyForTaking(exam);
         assertStudentCanAccessExam(student, exam);
 
         var existing = submissionRepository.findByExamAndStudentAndStatus(exam, student, SubmissionStatus.IN_PROGRESS);
@@ -144,8 +151,9 @@ public class StudentExamService {
         Exam exam = examRepository.findById(examId)
                 .orElseThrow(() -> new NotFoundException("Exam", examId));
         assertExamAvailable(exam);
+        assertReadyForTaking(exam);
         assertStudentCanAccessExam(student, exam);
-        return mapExamForStudent(exam);
+        return mapExamForStudent(exam, student);
     }
 
     private static final int MAX_CLIENT_OVER_SERVER_SEC = 60;
@@ -328,7 +336,7 @@ public class StudentExamService {
                 .build();
     }
 
-    private StudentExamDetailResponse mapExamForStudent(Exam exam) {
+    private StudentExamDetailResponse mapExamForStudent(Exam exam, Student student) {
         List<StudentExamSectionResponse> sections = sectionsOf(exam).stream()
                 .sorted((a, b) -> Integer.compare(
                         a.getOrderIndex() != null ? a.getOrderIndex() : 0,
@@ -344,6 +352,9 @@ public class StudentExamService {
                 .status(exam.getStatus())
                 .examType(exam.getExamType() != null ? exam.getExamType().name() : ExamType.PRACTICE.name())
                 .maxAttempts(exam.getMaxAttempts())
+                .completedAttempts(completedAttempts(exam, student))
+                .remainingAttempts(remainingAttempts(exam, student))
+                .hasInProgressSubmission(hasInProgressSubmission(exam, student))
                 .createdAt(exam.getCreatedAt())
                 .sections(sections)
                 .build();
@@ -421,6 +432,59 @@ public class StudentExamService {
     private static List<Question> questionsOf(ExamSection sec) {
         List<Question> q = sec.getQuestions();
         return q != null ? q : List.of();
+    }
+
+    private boolean isReadyForTaking(Exam exam) {
+        return questionCount(exam) > 0;
+    }
+
+    private void assertReadyForTaking(Exam exam) {
+        if (!isReadyForTaking(exam)) {
+            throw new BadRequestException("This exam is not ready yet. Please contact your teacher.");
+        }
+    }
+
+    private int questionCount(Exam exam) {
+        int total = 0;
+        for (ExamSection section : sectionsOf(exam)) {
+            total += questionsOf(section).size();
+        }
+        return total;
+    }
+
+    private long completedAttempts(Exam exam, Student student) {
+        return submissionRepository.countByExam_IdAndStudent_IdAndStatusIn(
+                exam.getId(),
+                student.getId(),
+                EnumSet.of(SubmissionStatus.SUBMITTED, SubmissionStatus.AUTO_SUBMITTED)
+        );
+    }
+
+    private boolean hasInProgressSubmission(Exam exam, Student student) {
+        return submissionRepository.findByExamAndStudentAndStatus(
+                exam,
+                student,
+                SubmissionStatus.IN_PROGRESS
+        ).isPresent();
+    }
+
+    private Integer remainingAttempts(Exam exam, Student student) {
+        Integer maxAttempts = effectiveMaxAttempts(exam);
+        if (maxAttempts == null) {
+            return null;
+        }
+        long completed = completedAttempts(exam, student);
+        return Math.max(0, maxAttempts - (int) Math.min(completed, Integer.MAX_VALUE));
+    }
+
+    private Integer effectiveMaxAttempts(Exam exam) {
+        if (exam.getMaxAttempts() != null) {
+            return exam.getMaxAttempts();
+        }
+        if (exam.getExamType() == ExamType.OFFICIAL) {
+            return 1;
+        }
+        return null;
     }
 
     private CompletionStats calculateCompletion(Exam exam, List<Answer> answers) {

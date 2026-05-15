@@ -11,7 +11,7 @@
 
   body {
     font-family: 'DM Sans', system-ui, sans-serif;
-    background: linear-gradient(to right, #ffffff, #f8f5f0);
+    background: #f6f8fb;
     color: #374151;
   }
 
@@ -43,8 +43,8 @@
   }
 
   .sidebar-link.active {
-    @apply bg-white/80 text-slate-900 shadow-[0_2px_8px_rgba(0,0,0,0.05)];
-    @apply ring-1 ring-amber-100/70;
+    @apply bg-blue-50 text-slate-900 shadow-[0_2px_8px_rgba(0,0,0,0.05)];
+    @apply ring-1 ring-blue-100;
   }
 
   /* Subtle blue accent bar for active item */

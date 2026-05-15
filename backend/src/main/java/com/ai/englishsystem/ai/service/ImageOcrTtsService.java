@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -66,6 +67,9 @@ public class ImageOcrTtsService {
 
     @Value("${app.ai.http.request-timeout-seconds:120}")
     private int httpRequestTimeoutSeconds;
+
+    @Value("${app.ai.http.total-timeout-seconds:170}")
+    private int httpTotalTimeoutSeconds;
 
     // Optional external OCR fallback (when local OCR is missing or returns empty).
     @Value("${app.ocr.external.api-key:}")
@@ -134,6 +138,7 @@ public class ImageOcrTtsService {
     public ImageOcrTtsResponse processImage(MultipartFile file) {
         validateInput(file);
         String unique = UUID.randomUUID().toString().replace("-", "");
+        Instant deadlineAt = Instant.now().plusSeconds(Math.max(20, httpTotalTimeoutSeconds));
 
         Path imageDir = Paths.get(uploadDir).toAbsolutePath().normalize().resolve("audio").resolve("images");
         Path ttsDir = Paths.get(uploadDir).toAbsolutePath().normalize().resolve("audio").resolve("tts");
@@ -149,7 +154,7 @@ public class ImageOcrTtsService {
             file.transferTo(imagePath.toFile());
             assertValidImageMagic(imagePath, file.getContentType());
 
-            String extractedText = normalizeWhitespace(runOcr(imagePath));
+            String extractedText = normalizeWhitespace(runOcr(imagePath, deadlineAt));
             if (extractedText.isBlank()) {
                 throw new BadRequestException("OCR extracted empty text from image");
             }
@@ -158,7 +163,7 @@ public class ImageOcrTtsService {
             String imageUrl = "/uploads/audio/images/" + imagePath.getFileName();
             String audioUrl = null;
             try {
-                synthesizeTextToMp3ViaLocalApi(parsed.questionText(), mp3Path);
+                synthesizeTextToMp3ViaLocalApi(parsed.questionText(), mp3Path, deadlineAt);
                 audioUrl = "/uploads/audio/tts/" + mp3Path.getFileName();
             } catch (Exception ttsError) {
                 log.warn("OCR succeeded but TTS failed: {}", ttsError.getMessage());
@@ -186,13 +191,14 @@ public class ImageOcrTtsService {
         if (cleanText.isBlank()) {
             throw new BadRequestException("text cannot be blank");
         }
+        Instant deadlineAt = Instant.now().plusSeconds(Math.max(20, httpTotalTimeoutSeconds));
         String unique = UUID.randomUUID().toString().replace("-", "");
         Path ttsDir = Paths.get(uploadDir).toAbsolutePath().normalize().resolve("audio").resolve("tts");
         Path mp3Path = ttsDir.resolve(unique + ".mp3").normalize();
         ensureSafePath(mp3Path, ttsDir);
         try {
             Files.createDirectories(ttsDir);
-            synthesizeTextToMp3ViaLocalApi(cleanText, mp3Path);
+            synthesizeTextToMp3ViaLocalApi(cleanText, mp3Path, deadlineAt);
             String audioUrl = "/uploads/audio/tts/" + mp3Path.getFileName();
             log.info("Generated TTS audio: {}", audioUrl);
             return audioUrl;
@@ -204,15 +210,15 @@ public class ImageOcrTtsService {
         }
     }
 
-    private void synthesizeTextToMp3ViaLocalApi(String text, Path mp3Path) throws Exception {
-        byte[] mp3Bytes = callLocalTtsBytes(text);
+    private void synthesizeTextToMp3ViaLocalApi(String text, Path mp3Path, Instant deadlineAt) throws Exception {
+        byte[] mp3Bytes = callLocalTtsBytes(text, deadlineAt);
         Files.write(mp3Path, mp3Bytes);
         if (!Files.exists(mp3Path) || Files.size(mp3Path) == 0) {
             throw new BadRequestException("TTS produced no audio output");
         }
     }
 
-    private byte[] callLocalTtsBytes(String text) throws IOException, InterruptedException {
+    private byte[] callLocalTtsBytes(String text, Instant deadlineAt) throws IOException, InterruptedException {
         String base = resolveTtsBaseUrl();
         if (base == null) {
             throw new BadRequestException(
@@ -226,7 +232,7 @@ public class ImageOcrTtsService {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoint))
                 .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
+                .timeout(resolveRequestTimeout(deadlineAt))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
 
@@ -341,8 +347,8 @@ public class ImageOcrTtsService {
                 && b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P';
     }
 
-    private String runOcr(Path imagePath) {
-        String localText = runOcrLocalHttp(imagePath);
+    private String runOcr(Path imagePath, Instant deadlineAt) {
+        String localText = runOcrLocalHttp(imagePath, deadlineAt);
         if (localText != null && !localText.isBlank()) {
             return localText;
         }
@@ -353,14 +359,14 @@ public class ImageOcrTtsService {
                             + "or set app.ocr.external.api-key for OCR.space fallback."
             );
         }
-        String externalText = runOcrSpace(imagePath);
+        String externalText = runOcrSpace(imagePath, deadlineAt);
         if (externalText == null || externalText.isBlank()) {
             throw new BadRequestException("External OCR returned empty text. Check image quality.");
         }
         return externalText;
     }
 
-    private String runOcrLocalHttp(Path imagePath) {
+    private String runOcrLocalHttp(Path imagePath, Instant deadlineAt) {
         try {
             String base = resolveOcrBaseUrl();
             if (base == null) {
@@ -377,7 +383,7 @@ public class ImageOcrTtsService {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(endpoint))
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
+                    .timeout(resolveRequestTimeout(deadlineAt))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                     .build();
 
@@ -442,7 +448,19 @@ public class ImageOcrTtsService {
         return s.substring(0, maxLen);
     }
 
-    private String runOcrSpace(Path imagePath) {
+    private Duration resolveRequestTimeout(Instant deadlineAt) {
+        long perRequestMs = Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)).toMillis();
+        if (deadlineAt == null) {
+            return Duration.ofMillis(perRequestMs);
+        }
+        long remainingMs = Duration.between(Instant.now(), deadlineAt).toMillis();
+        if (remainingMs <= 1000) {
+            throw new BadRequestException("AI timeout budget exhausted");
+        }
+        return Duration.ofMillis(Math.max(1000, Math.min(perRequestMs, remainingMs)));
+    }
+
+    private String runOcrSpace(Path imagePath, Instant deadlineAt) {
         try {
             byte[] imageBytes = Files.readAllBytes(imagePath);
             String filename = imagePath.getFileName() != null ? imagePath.getFileName().toString() : "image.png";
@@ -465,7 +483,7 @@ public class ImageOcrTtsService {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(endpoint))
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .timeout(Duration.ofSeconds(Math.max(5, httpRequestTimeoutSeconds)))
+                    .timeout(resolveRequestTimeout(deadlineAt))
                     .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                     .build();
 
