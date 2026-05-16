@@ -3,6 +3,7 @@ package com.ai.englishsystem.ai.controller;
 import com.ai.englishsystem.ai.dto.AiScoreResponse;
 import com.ai.englishsystem.ai.dto.ImageOcrTtsResponse;
 import com.ai.englishsystem.ai.dto.OcrToQuestionResponse;
+import com.ai.englishsystem.ai.dto.PaperOcrResponse;
 import com.ai.englishsystem.ai.dto.SpeakingScoreRequest;
 import com.ai.englishsystem.ai.dto.TextToSpeechRequest;
 import com.ai.englishsystem.ai.dto.TextToSpeechResponse;
@@ -55,6 +56,13 @@ public class AiController {
     public ResponseEntity<ApiResponse<ImageOcrTtsResponse>> imageOcrTts(@RequestParam("file") MultipartFile file) {
         ImageOcrTtsResponse response = imageOcrTtsService.processImage(file);
         return ResponseEntity.ok(ApiResponse.success("Image processed with OCR + TTS", response));
+    }
+
+    @PostMapping(value = "/ocr-paper", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<PaperOcrResponse>> ocrPaper(@RequestParam("file") MultipartFile file) {
+        PaperOcrResponse response = imageOcrTtsService.processPaper(file);
+        return ResponseEntity.ok(ApiResponse.success("Paper processed with OCR", response));
     }
 
     @PostMapping("/tts")

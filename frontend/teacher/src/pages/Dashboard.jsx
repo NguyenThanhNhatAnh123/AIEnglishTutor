@@ -3,24 +3,16 @@ import { Link } from 'react-router-dom';
 import { classApi, examApi, questionApi, submissionApi } from '../services/api';
 import Layout from '../components/Layout';
 import { PageLoader } from '../components/common/LoadingSpinner';
-
-function StatCard({ label, value, hint, tone = 'slate' }) {
-  const toneMap = {
-    slate: 'bg-white border-slate-200 text-slate-800',
-    blue: 'bg-blue-50 border-blue-200 text-blue-800',
-    emerald: 'bg-emerald-50 border-emerald-200 text-emerald-800',
-    amber: 'bg-amber-50 border-amber-200 text-amber-800',
-    violet: 'bg-violet-50 border-violet-200 text-violet-800',
-    rose: 'bg-rose-50 border-rose-200 text-rose-800',
-  };
-  return (
-    <div className={`rounded-2xl border p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${toneMap[tone] || toneMap.slate}`}>
-      <p className="text-xs uppercase tracking-wide font-semibold opacity-80">{label}</p>
-      <p className="text-3xl font-extrabold mt-2">{value}</p>
-      {hint && <p className="text-xs mt-1 opacity-80">{hint}</p>}
-    </div>
-  );
-}
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Progress,
+} from '../components/ui/shadcn';
 
 function toNumber(value) {
   const n = Number(value);
@@ -36,15 +28,157 @@ function formatScore(value) {
   return Number(value).toFixed(1);
 }
 
-function statusPill(status) {
+function formatDateTime(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function statusVariant(status) {
   const normalized = (status || '').toUpperCase();
-  if (normalized === 'SUBMITTED' || normalized === 'AUTO_SUBMITTED') {
-    return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+  if (normalized === 'SUBMITTED' || normalized === 'AUTO_SUBMITTED') return 'success';
+  if (normalized === 'IN_PROGRESS') return 'warning';
+  if (normalized === 'ACTIVE') return 'info';
+  return 'secondary';
+}
+
+function StatCard({ label, value, hint, trend, accent = 'bg-slate-900' }) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-slate-500">{label}</p>
+            <p className="mt-2 text-2xl font-semibold tracking-normal text-slate-950">{value}</p>
+          </div>
+          <span className={`mt-1 h-2.5 w-2.5 rounded-full ${accent}`} />
+        </div>
+        <div className="mt-3 flex items-center justify-between gap-2 text-xs text-slate-500">
+          <span>{hint}</span>
+          {trend && <Badge variant="outline">{trend}</Badge>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DonutChart({ segments, size = 150, stroke = 18 }) {
+  const total = segments.reduce((sum, item) => sum + item.value, 0);
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="#e2e8f0"
+          strokeWidth={stroke}
+        />
+        {total > 0 && segments.map((item) => {
+          const length = (item.value / total) * circumference;
+          const circle = (
+            <circle
+              key={item.label}
+              cx={size / 2}
+              cy={size / 2}
+              r={radius}
+              fill="none"
+              stroke={item.color}
+              strokeWidth={stroke}
+              strokeLinecap="round"
+              strokeDasharray={`${Math.max(0, length - 2)} ${circumference}`}
+              strokeDashoffset={-offset}
+            />
+          );
+          offset += length;
+          return circle;
+        })}
+      </svg>
+      <div className="absolute text-center">
+        <p className="text-2xl font-semibold text-slate-950">{total}</p>
+        <p className="text-xs text-slate-500">attempts</p>
+      </div>
+    </div>
+  );
+}
+
+function BarChart({ data }) {
+  const max = Math.max(1, ...data.map((item) => toNumber(item.avgScore)));
+  if (data.length === 0) {
+    return <div className="py-8 text-center text-sm text-slate-500">No performance data yet.</div>;
   }
-  if (normalized === 'IN_PROGRESS') {
-    return 'text-amber-700 bg-amber-50 border-amber-200';
-  }
-  return 'text-slate-700 bg-slate-50 border-slate-200';
+
+  return (
+    <div className="space-y-4">
+      {data.map((item) => {
+        const width = Math.max(4, (toNumber(item.avgScore) / max) * 100);
+        return (
+          <div key={item.examId} className="space-y-1.5">
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="truncate font-medium text-slate-700">{item.examTitle}</span>
+              <span className="tabular-nums text-slate-500">{formatScore(item.avgScore)}</span>
+            </div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-sky-600"
+                style={{ width: `${width}%` }}
+              />
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500">
+              <span>{item.attempts} attempts</span>
+              <span>{item.suspiciousAttempts} warnings</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AreaChart({ data }) {
+  const width = 620;
+  const height = 170;
+  const padX = 18;
+  const padY = 16;
+  const max = Math.max(1, ...data.map((d) => d.count));
+  const points = data.map((d, index) => {
+    const x = padX + (index * (width - padX * 2)) / Math.max(1, data.length - 1);
+    const y = height - padY - (d.count / max) * (height - padY * 2);
+    return { ...d, x, y };
+  });
+  const line = points.map((p) => `${p.x},${p.y}`).join(' ');
+  const area = `${padX},${height - padY} ${line} ${width - padX},${height - padY}`;
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} className="h-44 w-full">
+        <defs>
+          <linearGradient id="submissionArea" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#0f766e" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="#0f766e" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        {[0, 1, 2, 3].map((tick) => {
+          const y = padY + (tick * (height - padY * 2)) / 3;
+          return <line key={tick} x1={padX} x2={width - padX} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" />;
+        })}
+        <polygon points={area} fill="url(#submissionArea)" />
+        <polyline points={line} fill="none" stroke="#0f766e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        {points.map((p) => (
+          <circle key={p.label} cx={p.x} cy={p.y} r="4" fill="#0f766e" stroke="#fff" strokeWidth="2" />
+        ))}
+      </svg>
+      <div className="grid grid-cols-7 gap-2 text-center text-[11px] text-slate-500">
+        {points.map((p) => <span key={p.label}>{p.label}</span>)}
+      </div>
+    </div>
+  );
 }
 
 export default function Dashboard() {
@@ -134,12 +268,32 @@ export default function Dashboard() {
         ...item,
         avgScore: item.gradedAttempts ? (item.scoreSum / item.gradedAttempts) : null,
       }))
+      .filter((item) => item.avgScore != null)
       .sort((a, b) => b.attempts - a.attempts)
       .slice(0, 8);
 
     const recentSubmissions = [...submissions]
       .sort((a, b) => latestWorkTime(b) - latestWorkTime(a))
-      .slice(0, 10);
+      .slice(0, 8);
+
+    const dayBuckets = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (6 - index));
+      date.setHours(0, 0, 0, 0);
+      return {
+        key: date.toISOString().slice(0, 10),
+        label: date.toLocaleDateString(undefined, { weekday: 'short' }),
+        count: 0,
+      };
+    });
+    const bucketMap = new Map(dayBuckets.map((item) => [item.key, item]));
+    submissions.forEach((s) => {
+      const time = latestWorkTime(s);
+      if (!time) return;
+      const key = new Date(time).toISOString().slice(0, 10);
+      const bucket = bucketMap.get(key);
+      if (bucket) bucket.count += 1;
+    });
 
     return {
       manageableExams,
@@ -152,6 +306,7 @@ export default function Dashboard() {
       passRate,
       examPerformance,
       recentSubmissions,
+      dayBuckets,
     };
   }, [exams, submissions]);
 
@@ -163,159 +318,119 @@ export default function Dashboard() {
     );
   }
 
+  const statusSegments = [
+    { label: 'Completed', value: stats.completedSubs.length, color: '#059669', variant: 'success' },
+    { label: 'In progress', value: stats.inProgressSubs.length, color: '#d97706', variant: 'warning' },
+    { label: 'Warnings', value: stats.suspiciousSubs.length, color: '#e11d48', variant: 'danger' },
+  ];
+
   return (
     <Layout>
-      <div className="space-y-6">
-        <div className="rounded-2xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide font-bold text-blue-200">Teacher analytics</p>
-              <h2 className="mt-2 text-3xl font-extrabold">Teaching overview</h2>
-              <p className="mt-2 max-w-2xl text-sm text-slate-300">
-                Monitor submissions, grading workload, score quality, and exam health in one workspace.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <Link to="/results" className="rounded-xl bg-white px-4 py-2 font-bold text-slate-900 transition hover:bg-blue-50">Results</Link>
-              <Link to="/exams" className="rounded-xl border border-white/20 px-4 py-2 font-bold text-white transition hover:bg-white/10">Exams</Link>
-              <Link to="/questions" className="rounded-xl border border-white/20 px-4 py-2 font-bold text-white transition hover:bg-white/10">Question bank</Link>
-            </div>
+      <div className="space-y-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <Badge variant="outline">Teacher dashboard</Badge>
+            <h1 className="mt-3 text-3xl font-semibold tracking-normal text-slate-950">Teaching overview</h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-500">
+              A compact workspace for exam health, submissions, grading throughput, and class access.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button asChild variant="outline">
+              <Link to="/results" className="px-4">Results</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/exams" className="px-4">Exams</Link>
+            </Button>
+            <Button asChild>
+              <Link to="/questions" className="px-4 text-white">Question bank</Link>
+            </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          <StatCard label="Classes" value={classes.length} hint="Managed classes" tone="blue" />
-          <StatCard label="Exams" value={stats.manageableExams.length} hint={`${stats.activeExams.length} active`} tone="emerald" />
-          <StatCard label="Questions" value={questions.length} hint="All question types" tone="violet" />
-          <StatCard label="Submissions" value={submissions.length} hint={`${stats.completedSubs.length} completed`} tone="slate" />
-          <StatCard label="In Progress" value={stats.inProgressSubs.length} hint="Open exam sessions" tone="amber" />
-          <StatCard label="Suspicious" value={stats.suspiciousSubs.length} hint="Attempts with warnings" tone="rose" />
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Classes" value={classes.length} hint="Managed cohorts" accent="bg-sky-600" />
+          <StatCard label="Active Exams" value={stats.activeExams.length} hint={`${stats.manageableExams.length} total exams`} accent="bg-emerald-600" />
+          <StatCard label="Question Bank" value={questions.length} hint="Reusable items" accent="bg-violet-600" />
+          <StatCard label="Avg Score" value={formatScore(stats.averageScore)} hint={`${stats.gradedSubs.length} graded submissions`} trend={`${stats.passRate}% pass`} accent="bg-amber-500" />
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Score Quality</h3>
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-600">Average score</span>
-                <span className="font-semibold text-slate-800">{formatScore(stats.averageScore)}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-600">Pass rate (&gt;= 50)</span>
-                <span className="font-semibold text-slate-800">{stats.passRate}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                <div className="h-full bg-emerald-600" style={{ width: `${stats.passRate}%` }} />
-              </div>
-              <p className="text-xs text-slate-500">
-                Based on {stats.gradedSubs.length} graded submissions.
-              </p>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(340px,0.7fr)]">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Submission Activity</CardTitle>
+              <CardDescription>Attempts recorded over the last seven days.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AreaChart data={stats.dayBuckets} />
+            </CardContent>
+          </Card>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Exam Status Mix</h3>
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-600">Active exams</span>
-                <span className="font-semibold text-slate-800">{stats.activeExams.length}</span>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle>Status Mix</CardTitle>
+              <CardDescription>Completed, open, and flagged attempts.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-[160px_minmax(0,1fr)] xl:grid-cols-1 2xl:grid-cols-[160px_minmax(0,1fr)]">
+              <DonutChart segments={statusSegments} />
+              <div className="space-y-3">
+                {statusSegments.map((item) => (
+                  <div key={item.label} className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="text-sm text-slate-600">{item.label}</span>
+                    </div>
+                    <Badge variant={item.variant}>{item.value}</Badge>
+                  </div>
+                ))}
+                <Progress value={stats.passRate} indicatorClassName="bg-emerald-600" />
+                <p className="text-xs text-slate-500">{stats.passRate}% pass rate from graded submissions.</p>
               </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-600">Non-active exams</span>
-                <span className="font-semibold text-slate-800">{Math.max(0, stats.manageableExams.length - stats.activeExams.length)}</span>
-              </div>
-              <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                <div
-                  className="h-full bg-blue-600"
-                  style={{
-                    width: `${stats.manageableExams.length ? Math.round((stats.activeExams.length / stats.manageableExams.length) * 100) : 0}%`,
-                  }}
-                />
-              </div>
-              <p className="text-xs text-slate-500">
-                Active ratio across manageable exams.
-              </p>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-slate-700">Recent Submissions</h3>
-            <Link to="/results" className="text-sm text-blue-600 hover:underline">Open results</Link>
-          </div>
-          {stats.recentSubmissions.length === 0 ? (
-            <div className="p-6 text-sm text-slate-500">No submissions yet.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[820px]">
-                <thead className="bg-slate-50 border-b border-slate-100">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Student</th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Exam</th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Status</th>
-                    <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Score</th>
-                    <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Latest Time</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Top Exam Performance</CardTitle>
+              <CardDescription>Average score by exam, ranked by attempts.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <BarChart data={stats.examPerformance} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle>Recent Submissions</CardTitle>
+                <CardDescription>Latest student work across your exams.</CardDescription>
+              </div>
+              <Link to="/results" className="text-sm font-medium text-sky-700 hover:underline">Open</Link>
+            </CardHeader>
+            <CardContent>
+              {stats.recentSubmissions.length === 0 ? (
+                <div className="py-8 text-center text-sm text-slate-500">No submissions yet.</div>
+              ) : (
+                <div className="space-y-3">
                   {stats.recentSubmissions.map((s) => (
-                    <tr key={s.id}>
-                      <td className="px-4 py-2 text-slate-700">{s.studentName || `Student #${s.studentId}`}</td>
-                      <td className="px-4 py-2 text-slate-700">{s.examTitle || `Exam #${s.examId}`}</td>
-                      <td className="px-4 py-2">
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${statusPill(s.status)}`}>
-                          {s.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2 text-center font-semibold text-blue-700">{formatScore(s.totalScore)}</td>
-                      <td className="px-4 py-2 text-right text-xs text-slate-500">
-                        {(s.endTime || s.submitTime || s.startTime)
-                          ? new Date(s.endTime || s.submitTime || s.startTime).toLocaleString()
-                          : '-'}
-                      </td>
-                    </tr>
+                    <div key={s.id} className="grid gap-2 rounded-lg border border-slate-100 bg-slate-50/70 p-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-slate-900">{s.studentName || `Student #${s.studentId}`}</p>
+                        <p className="truncate text-xs text-slate-500">{s.examTitle || `Exam #${s.examId}`}</p>
+                      </div>
+                      <div className="flex items-center gap-2 sm:justify-end">
+                        <Badge variant={statusVariant(s.status)}>{s.status}</Badge>
+                        <span className="min-w-12 text-right text-sm font-semibold text-sky-700">{formatScore(s.totalScore)}</span>
+                      </div>
+                      <p className="text-xs text-slate-400 sm:col-span-2">{formatDateTime(s.endTime || s.submitTime || s.startTime)}</p>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100">
-            <h3 className="text-sm font-semibold text-slate-700">Top Exam Performance</h3>
-          </div>
-          {stats.examPerformance.length === 0 ? (
-            <div className="p-6 text-sm text-slate-500">No exam performance data yet.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[780px]">
-                <thead className="bg-slate-50 border-b border-slate-100">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Exam</th>
-                    <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Attempts</th>
-                    <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Avg Score</th>
-                    <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Suspicious</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-50">
-                  {stats.examPerformance.map((item) => (
-                    <tr key={item.examId}>
-                      <td className="px-4 py-2 text-slate-700">{item.examTitle}</td>
-                      <td className="px-4 py-2 text-center font-semibold text-slate-700">{item.attempts}</td>
-                      <td className="px-4 py-2 text-center font-semibold text-blue-700">{formatScore(item.avgScore)}</td>
-                      <td className="px-4 py-2 text-center">
-                        <span className={`text-xs font-semibold ${item.suspiciousAttempts > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
-                          {item.suspiciousAttempts}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </Layout>

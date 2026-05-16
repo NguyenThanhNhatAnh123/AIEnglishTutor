@@ -3,6 +3,11 @@ package com.ai.englishsystem.exam;
 import com.ai.englishsystem.auth.entity.Role;
 import com.ai.englishsystem.auth.repository.RoleRepository;
 import com.ai.englishsystem.common.exception.BadRequestException;
+import com.ai.englishsystem.common.exception.ForbiddenException;
+import com.ai.englishsystem.classmodule.entity.ClassEntity;
+import com.ai.englishsystem.classmodule.entity.ClassStudent;
+import com.ai.englishsystem.classmodule.repository.ClassRepository;
+import com.ai.englishsystem.classmodule.repository.ClassStudentRepository;
 import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.entity.ExamAttempt;
 import com.ai.englishsystem.exam.entity.ExamSection;
@@ -57,6 +62,10 @@ class OfficialExamAttemptRulesTest {
     private SubmissionRepository submissionRepository;
     @Autowired
     private ExamAttemptRepository examAttemptRepository;
+    @Autowired
+    private ClassRepository classRepository;
+    @Autowired
+    private ClassStudentRepository classStudentRepository;
 
     @AfterEach
     void clearSecurity() {
@@ -80,6 +89,70 @@ class OfficialExamAttemptRulesTest {
 
         var next = studentExamService.startExam(f.exam().getId());
         assertThat(next.getId()).isNotEqualTo(f.submission().getId());
+    }
+
+    @Test
+    void classRestrictedExamIsVisibleAndStartableOnlyForAssignedClassStudents() {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        Role teacherRole = roleRepository.findByName("TEACHER").orElseThrow();
+        Role studentRole = roleRepository.findByName("STUDENT").orElseThrow();
+
+        User teacherUser = userRepository.save(User.builder()
+                .username("cls-t-" + suffix)
+                .email("cls-t-" + suffix + "@example.com")
+                .password("x")
+                .fullName("Teacher")
+                .role(teacherRole)
+                .status("ACTIVE")
+                .build());
+        Teacher teacher = teacherRepository.save(Teacher.builder()
+                .user(teacherUser)
+                .teacherCode("CT-" + suffix)
+                .department("English")
+                .build());
+        User allowedUser = userRepository.save(studentUser("cls-in-" + suffix, studentRole));
+        User blockedUser = userRepository.save(studentUser("cls-out-" + suffix, studentRole));
+        Student allowedStudent = studentRepository.save(Student.builder()
+                .user(allowedUser)
+                .studentCode("CIS-" + suffix)
+                .build());
+        studentRepository.save(Student.builder()
+                .user(blockedUser)
+                .studentCode("COS-" + suffix)
+                .build());
+
+        ClassEntity allowedClass = classRepository.save(ClassEntity.builder()
+                .name("IELTS " + suffix)
+                .teacher(teacher)
+                .description("Allowed cohort")
+                .build());
+        classStudentRepository.save(ClassStudent.builder()
+                .classEntity(allowedClass)
+                .student(allowedStudent)
+                .build());
+
+        Exam exam = examRepository.save(Exam.builder()
+                .title("Restricted " + suffix)
+                .teacher(teacher)
+                .durationMinutes(30)
+                .status("ACTIVE")
+                .examType(ExamType.PRACTICE)
+                .build());
+        exam.getAllowedClasses().add(allowedClass);
+        addReadyQuestion(exam);
+        examRepository.saveAndFlush(exam);
+
+        authenticateAs(blockedUser.getId(), "ROLE_STUDENT");
+        assertThat(studentExamService.getActiveExams())
+                .noneMatch(e -> e.getId().equals(exam.getId()));
+        assertThatThrownBy(() -> studentExamService.startExam(exam.getId()))
+                .isInstanceOf(ForbiddenException.class)
+                .hasMessageContaining("not assigned");
+
+        authenticateAs(allowedUser.getId(), "ROLE_STUDENT");
+        assertThat(studentExamService.getActiveExams())
+                .anyMatch(e -> e.getId().equals(exam.getId()));
+        assertThat(studentExamService.startExam(exam.getId()).getExamId()).isEqualTo(exam.getId());
     }
 
     private Fixture buildOfficialExamFixture() {
@@ -209,6 +282,17 @@ class OfficialExamAttemptRulesTest {
                 new TestingAuthenticationToken(String.valueOf(userId), null, authority);
         authentication.setAuthenticated(true);
         SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
+    private User studentUser(String username, Role role) {
+        return User.builder()
+                .username(username)
+                .email(username + "@example.com")
+                .password("x")
+                .fullName("Student")
+                .role(role)
+                .status("ACTIVE")
+                .build();
     }
 
     private void addReadyQuestion(Exam exam) {

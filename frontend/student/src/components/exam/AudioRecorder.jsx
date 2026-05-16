@@ -27,6 +27,7 @@ export default function AudioRecorder({
   const [uploading, setUploading] = useState(false);
   const [localReady, setLocalReady] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [replaceMode, setReplaceMode] = useState(false);
   const mediaRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
@@ -53,6 +54,7 @@ export default function AudioRecorder({
   const startRecord = async () => {
     if (disabled || uploading || submissionId == null || questionId == null) return;
     try {
+      setReplaceMode(false);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
@@ -127,6 +129,7 @@ export default function AudioRecorder({
   };
 
   const clearLocal = () => {
+    setReplaceMode(false);
     setLocalReady(false);
     onChange?.({
       speakingBlob: null,
@@ -167,10 +170,12 @@ export default function AudioRecorder({
           ? 'Recording disabled - exam time has ended.'
           : recording
             ? `Recording... ${elapsedSeconds}s / ${maxSeconds}s`
+            : replaceMode
+              ? 'Ready to record again. The new recording will replace the previous one.'
             : (localReady || hasLocalBlob)
               ? 'Recording saved locally. It will upload when you submit the exam.'
-              : hasServer
-                ? 'A previous recording exists. Re-record to replace it before submit.'
+            : hasServer
+                ? 'Your speaking answer is saved. You can record again to replace it.'
                 : 'Press start to record your answer.'}
       </p>
 
@@ -179,12 +184,31 @@ export default function AudioRecorder({
           <Button variant="danger" onClick={stopRecord} disabled={disabled || uploading}>
             Stop
           </Button>
+        ) : replaceMode ? (
+          <>
+            <Button variant="primary" onClick={startRecord} disabled={disabled || uploading}>
+              {uploading ? 'Uploading...' : 'Start new recording'}
+            </Button>
+            <Button variant="secondary" onClick={() => setReplaceMode(false)} disabled={disabled || uploading}>
+              Keep current
+            </Button>
+          </>
         ) : (
-          <Button variant="primary" onClick={startRecord} disabled={disabled || uploading}>
-            {uploading ? 'Uploading...' : (localReady || hasLocalBlob || hasServer) ? 'Re-record' : 'Start recording'}
+          <Button
+            variant={hasServer || hasLocalBlob || localReady ? 'secondary' : 'primary'}
+            onClick={() => {
+              if (hasServer || hasLocalBlob || localReady) {
+                setReplaceMode(true);
+                return;
+              }
+              startRecord();
+            }}
+            disabled={disabled || uploading}
+          >
+            {uploading ? 'Uploading...' : (localReady || hasLocalBlob || hasServer) ? 'Record again' : 'Start recording'}
           </Button>
         )}
-        {(localReady || hasLocalBlob) && !recording && (
+        {(localReady || hasLocalBlob) && !recording && !replaceMode && (
           <Button variant="secondary" onClick={clearLocal} disabled={disabled || uploading}>
             Clear recording
           </Button>

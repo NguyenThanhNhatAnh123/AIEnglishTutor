@@ -126,6 +126,8 @@ services:
       WHISPER_DEVICE: cpu
       WHISPER_COMPUTE_TYPE: int8
       WHISPER_PRELOAD: "1"
+      OCR_ENGINE: tesseract
+      OCR_MAX_PDF_PAGES: "20"
       OCR_ALLOW_TESSERACT_FALLBACK: "1"
       TESS_LANG: eng
     ports:

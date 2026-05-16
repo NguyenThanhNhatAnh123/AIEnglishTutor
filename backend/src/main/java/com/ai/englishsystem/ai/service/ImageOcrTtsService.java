@@ -1,6 +1,8 @@
 package com.ai.englishsystem.ai.service;
 
 import com.ai.englishsystem.ai.dto.ImageOcrTtsResponse;
+import com.ai.englishsystem.ai.dto.PaperOcrQuestionDraft;
+import com.ai.englishsystem.ai.dto.PaperOcrResponse;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,9 +43,17 @@ public class ImageOcrTtsService {
             "image/jpg",
             "image/webp"
     );
+    private static final Set<String> ALLOWED_PAPER_MIME = Set.of(
+            "image/png",
+            "image/jpeg",
+            "image/jpg",
+            "image/webp",
+            "application/pdf"
+    );
     private static final Pattern CHOICE_PREFIX = Pattern.compile("^(?:[A-Da-d][\\).]|\\d+[\\).]|[-*•])\\s+");
 
     private final ObjectMapper objectMapper;
+    private final PaperOcrParser paperOcrParser;
 
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
@@ -80,6 +90,18 @@ public class ImageOcrTtsService {
 
     @Value("${app.ocr.external.language:eng}")
     private String ocrSpaceLanguage;
+
+    @Value("${app.ai.deepseek.api-key:}")
+    private String deepSeekApiKey;
+
+    @Value("${app.ai.deepseek.base-url:https://api.deepseek.com}")
+    private String deepSeekBaseUrl;
+
+    @Value("${app.ai.deepseek.model:deepseek-chat}")
+    private String deepSeekModel;
+
+    @Value("${app.ai.ocr-json.timeout-seconds:20}")
+    private int ocrJsonTimeoutSeconds;
 
     /** Shared, reusable HttpClient instance (created once, reused across calls). */
     private volatile HttpClient httpClient;
@@ -186,6 +208,46 @@ public class ImageOcrTtsService {
         }
     }
 
+    public PaperOcrResponse processPaper(MultipartFile file) {
+        validatePaperInput(file);
+        String unique = UUID.randomUUID().toString().replace("-", "");
+        Instant deadlineAt = Instant.now().plusSeconds(Math.max(20, httpTotalTimeoutSeconds));
+
+        Path paperDir = Paths.get(uploadDir).toAbsolutePath().normalize().resolve("audio").resolve("images");
+        Path paperPath = paperDir.resolve(unique + uploadExt(file.getContentType())).normalize();
+        ensureSafePath(paperPath, paperDir);
+
+        try {
+            Files.createDirectories(paperDir);
+            file.transferTo(paperPath.toFile());
+            assertValidPaperMagic(paperPath, file.getContentType());
+
+            String extractedText = normalizeWhitespace(runOcr(paperPath, deadlineAt));
+            if (extractedText.isBlank()) {
+                throw new BadRequestException("OCR extracted empty text from file");
+            }
+
+            List<PaperOcrQuestionDraft> questions = parsePaperQuestions(extractedText, deadlineAt);
+            if (questions.isEmpty()) {
+                throw new BadRequestException("OCR did not find recognizable questions");
+            }
+
+            String fileUrl = "/uploads/audio/images/" + paperPath.getFileName();
+            log.info("Paper OCR completed: file={}, questions={}", fileUrl, questions.size());
+            return PaperOcrResponse.builder()
+                    .fileUrl(fileUrl)
+                    .extractedText(extractedText)
+                    .questions(questions)
+                    .build();
+        } catch (BadRequestException e) {
+            log.warn("Paper OCR rejected: {}", e.getMessage());
+            throw e;
+        } catch (Exception e) {
+            log.error("Paper OCR failed", e);
+            throw new BadRequestException("Paper OCR processing failed: " + e.getMessage());
+        }
+    }
+
     public String synthesizeTextToAudio(String text) {
         String cleanText = normalizeWhitespace(text);
         if (cleanText.isBlank()) {
@@ -280,6 +342,19 @@ public class ImageOcrTtsService {
         }
     }
 
+    private void validatePaperInput(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BadRequestException("File is empty");
+        }
+        if (file.getSize() > MAX_IMAGE_BYTES) {
+            throw new BadRequestException("File must be 10 MB or smaller");
+        }
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_PAPER_MIME.contains(contentType.toLowerCase(Locale.ROOT))) {
+            throw new BadRequestException("Unsupported file Content-Type (allowed: png/jpg/jpeg/webp/pdf)");
+        }
+    }
+
     private static void ensureSafePath(Path target, Path parent) {
         if (!target.startsWith(parent)) {
             throw new BadRequestException("Invalid path");
@@ -287,11 +362,17 @@ public class ImageOcrTtsService {
     }
 
     private static String imageExt(String contentType) {
+        String ext = uploadExt(contentType);
+        return ".pdf".equals(ext) ? ".img" : ext;
+    }
+
+    private static String uploadExt(String contentType) {
         String ct = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT);
         return switch (ct) {
             case "image/png" -> ".png";
             case "image/jpeg", "image/jpg" -> ".jpg";
             case "image/webp" -> ".webp";
+            case "application/pdf" -> ".pdf";
             default -> ".img";
         };
     }
@@ -318,6 +399,23 @@ public class ImageOcrTtsService {
             }
         } catch (IOException e) {
             throw new BadRequestException("Cannot read uploaded image: " + e.getMessage());
+        }
+    }
+
+    private static void assertValidPaperMagic(Path file, String contentType) {
+        String ct = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT);
+        if (!"application/pdf".equals(ct)) {
+            assertValidImageMagic(file, contentType);
+            return;
+        }
+        try (var in = Files.newInputStream(file)) {
+            byte[] head = in.readNBytes(5);
+            if (head.length < 5 || head[0] != '%' || head[1] != 'P' || head[2] != 'D'
+                    || head[3] != 'F' || head[4] != '-') {
+                throw new BadRequestException("PDF content does not match declared type");
+            }
+        } catch (IOException e) {
+            throw new BadRequestException("Cannot read uploaded PDF: " + e.getMessage());
         }
     }
 
@@ -364,6 +462,266 @@ public class ImageOcrTtsService {
             throw new BadRequestException("External OCR returned empty text. Check image quality.");
         }
         return externalText;
+    }
+
+    private List<PaperOcrQuestionDraft> parsePaperQuestions(String extractedText, Instant deadlineAt) {
+        if (deepSeekApiKey != null && !deepSeekApiKey.isBlank() && hasBudgetLeft(deadlineAt)) {
+            try {
+                Instant parserDeadlineAt = capDeadline(deadlineAt, Math.max(3, ocrJsonTimeoutSeconds));
+                List<PaperOcrQuestionDraft> aiQuestions = parsePaperQuestionsWithDeepSeek(extractedText, parserDeadlineAt);
+                if (!aiQuestions.isEmpty()) {
+                    return aiQuestions;
+                }
+                log.warn("AI OCR question parser returned no usable questions; falling back to rule parser");
+            } catch (Exception e) {
+                log.warn("AI OCR question parser failed: {}", e.getMessage());
+            }
+        }
+        return paperOcrParser.parse(extractedText);
+    }
+
+    private List<PaperOcrQuestionDraft> parsePaperQuestionsWithDeepSeek(
+            String extractedText,
+            Instant deadlineAt
+    ) throws Exception {
+        String base = deepSeekBaseUrl != null ? deepSeekBaseUrl.trim() : "";
+        if (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        String endpoint = base + "/chat/completions";
+        String prompt = buildOcrQuestionJsonPrompt(extractedText);
+        String payload = objectMapper.writeValueAsString(
+                java.util.Map.of(
+                        "model", deepSeekModel,
+                        "messages", java.util.List.of(
+                                java.util.Map.of(
+                                        "role", "system",
+                                        "content", "You convert OCR text from English exam papers into strict JSON only. Do not add explanations."
+                                ),
+                                java.util.Map.of(
+                                        "role", "user",
+                                        "content", prompt
+                                )
+                        ),
+                        "temperature", 0.1
+                )
+        );
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint))
+                .header("Authorization", "Bearer " + deepSeekApiKey)
+                .header("Content-Type", "application/json")
+                .timeout(resolveRequestTimeout(deadlineAt))
+                .POST(HttpRequest.BodyPublishers.ofString(payload))
+                .build();
+
+        HttpResponse<String> response = httpClient().send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("DeepSeek OCR parser HTTP " + response.statusCode());
+        }
+
+        JsonNode root = objectMapper.readTree(response.body());
+        String content = root.path("choices").path(0).path("message").path("content").asText(null);
+        if (content == null || content.isBlank()) {
+            throw new IllegalStateException("DeepSeek OCR parser returned empty content");
+        }
+        return normalizeAiQuestionDrafts(content);
+    }
+
+    private static String buildOcrQuestionJsonPrompt(String extractedText) {
+        return """
+                Convert this OCR text into the JSON shape expected by the Add Question bulk editor.
+
+                Return JSON only. Prefer this exact array shape:
+                [
+                  {
+                    "questionNumber": 1,
+                    "questionText": "Question text only, without A/B/C/D options",
+                    "options": [
+                      { "optionText": "Option A text", "isCorrect": true },
+                      { "optionText": "Option B text", "isCorrect": false }
+                    ],
+                    "rawText": "Original OCR lines for this question"
+                  }
+                ]
+
+                Rules:
+                - Split every separate numbered question into a separate array item.
+                - Remove option labels such as A., B), C: from optionText.
+                - If an answer key is present, mark exactly one option isCorrect=true.
+                - If no answer key is present, mark the first option isCorrect=true so the teacher can review and change it.
+                - Do not invent questions or options that are not present in the OCR text.
+                - Keep English exam wording; only fix obvious OCR spacing/punctuation issues.
+
+                OCR text:
+                """ + trimToLength(extractedText, 24000);
+    }
+
+    private List<PaperOcrQuestionDraft> normalizeAiQuestionDrafts(String content) throws IOException {
+        JsonNode root = readAiJson(content);
+        JsonNode items = root.isArray() ? root : root.path("questions");
+        if (!items.isArray()) {
+            return List.of();
+        }
+
+        List<PaperOcrQuestionDraft> out = new ArrayList<>();
+        for (JsonNode item : items) {
+            if (item == null || item.isNull()) {
+                continue;
+            }
+            String questionText = firstText(item, "questionText", "question", "prompt");
+            List<AiOption> options = readAiOptions(item);
+            List<String> choices = options.stream()
+                    .map(AiOption::optionText)
+                    .map(String::trim)
+                    .filter(s -> !s.isBlank())
+                    .toList();
+            if ((questionText == null || questionText.isBlank()) && choices.isEmpty()) {
+                continue;
+            }
+
+            int correctIndex = readCorrectIndex(item, options, choices.size());
+            String rawText = firstText(item, "rawText", "sourceText");
+            if (rawText == null || rawText.isBlank()) {
+                rawText = buildRawQuestionText(questionText, choices);
+            }
+
+            out.add(PaperOcrQuestionDraft.builder()
+                    .questionNumber(readNullableInt(item.path("questionNumber")))
+                    .questionText(questionText == null ? "" : questionText.trim())
+                    .choices(choices)
+                    .correctChoiceIndex(correctIndex)
+                    .rawText(rawText.trim())
+                    .build());
+        }
+        return out;
+    }
+
+    private JsonNode readAiJson(String content) throws IOException {
+        String normalized = stripJsonFence(content.trim());
+        try {
+            return objectMapper.readTree(normalized);
+        } catch (IOException first) {
+            int arrayStart = normalized.indexOf('[');
+            int arrayEnd = normalized.lastIndexOf(']');
+            if (arrayStart >= 0 && arrayEnd > arrayStart) {
+                return objectMapper.readTree(normalized.substring(arrayStart, arrayEnd + 1));
+            }
+            int objectStart = normalized.indexOf('{');
+            int objectEnd = normalized.lastIndexOf('}');
+            if (objectStart >= 0 && objectEnd > objectStart) {
+                return objectMapper.readTree(normalized.substring(objectStart, objectEnd + 1));
+            }
+            throw first;
+        }
+    }
+
+    private static String stripJsonFence(String text) {
+        String out = text;
+        if (out.startsWith("```json")) {
+            out = out.substring(7);
+        } else if (out.startsWith("```")) {
+            out = out.substring(3);
+        }
+        if (out.endsWith("```")) {
+            out = out.substring(0, out.length() - 3);
+        }
+        return out.trim();
+    }
+
+    private static List<AiOption> readAiOptions(JsonNode item) {
+        JsonNode optionsNode = item.path("options");
+        if (!optionsNode.isArray()) {
+            optionsNode = item.path("choices");
+        }
+        if (!optionsNode.isArray()) {
+            return List.of();
+        }
+
+        List<AiOption> options = new ArrayList<>();
+        for (JsonNode optionNode : optionsNode) {
+            if (optionNode == null || optionNode.isNull()) {
+                continue;
+            }
+            String optionText;
+            boolean isCorrect = false;
+            if (optionNode.isTextual()) {
+                optionText = optionNode.asText("");
+            } else {
+                optionText = firstText(optionNode, "optionText", "text", "label", "value");
+                isCorrect = optionNode.path("isCorrect").asBoolean(false)
+                        || optionNode.path("correct").asBoolean(false);
+            }
+            if (optionText != null && !optionText.isBlank()) {
+                options.add(new AiOption(optionText.trim(), isCorrect));
+            }
+        }
+        return options;
+    }
+
+    private static int readCorrectIndex(JsonNode item, List<AiOption> options, int choiceCount) {
+        int marked = -1;
+        for (int i = 0; i < options.size(); i++) {
+            if (options.get(i).isCorrect()) {
+                marked = i;
+                break;
+            }
+        }
+        if (marked >= 0) {
+            return marked;
+        }
+        Integer explicit = readNullableInt(item.path("correctChoiceIndex"));
+        if (explicit != null && explicit >= 0 && explicit < choiceCount) {
+            return explicit;
+        }
+        return 0;
+    }
+
+    private static String firstText(JsonNode node, String... fieldNames) {
+        for (String fieldName : fieldNames) {
+            JsonNode child = node.path(fieldName);
+            if (child.isTextual() && !child.asText("").isBlank()) {
+                return child.asText("").trim();
+            }
+        }
+        return null;
+    }
+
+    private static Integer readNullableInt(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.canConvertToInt()) {
+            return node.asInt();
+        }
+        if (node.isTextual()) {
+            try {
+                return Integer.parseInt(node.asText().trim());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static String buildRawQuestionText(String questionText, List<String> choices) {
+        StringBuilder sb = new StringBuilder(questionText == null ? "" : questionText.trim());
+        for (int i = 0; i < choices.size(); i++) {
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append((char) ('A' + i)).append(". ").append(choices.get(i));
+        }
+        return sb.toString();
+    }
+
+    private static boolean hasBudgetLeft(Instant deadlineAt) {
+        return deadlineAt == null || Instant.now().isBefore(deadlineAt);
+    }
+
+    private static Instant capDeadline(Instant deadlineAt, int maxSecondsFromNow) {
+        Instant cap = Instant.now().plusSeconds(Math.max(1, maxSecondsFromNow));
+        return deadlineAt == null || cap.isBefore(deadlineAt) ? cap : deadlineAt;
     }
 
     private String runOcrLocalHttp(Path imagePath, Instant deadlineAt) {
@@ -439,6 +797,7 @@ public class ImageOcrTtsService {
         if (lower.endsWith(".png")) return "image/png";
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
         if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".pdf")) return "application/pdf";
         return "application/octet-stream";
     }
 
@@ -470,6 +829,7 @@ public class ImageOcrTtsService {
                 case "png" -> "image/png";
                 case "jpeg", "jpg" -> "image/jpeg";
                 case "webp" -> "image/webp";
+                case "pdf" -> "application/pdf";
                 default -> "application/octet-stream";
             };
 
@@ -575,6 +935,7 @@ public class ImageOcrTtsService {
             case "png" -> "PNG";
             case "jpeg", "jpg" -> "JPG";
             case "webp" -> "WEBP";
+            case "pdf" -> "PDF";
             default -> "PNG";
         };
     }
@@ -611,6 +972,8 @@ public class ImageOcrTtsService {
         String questionText = questionLines.isEmpty() ? extractedText : String.join(" ", questionLines).trim();
         return new OcrParsed(questionText, choices);
     }
+
+    private record AiOption(String optionText, boolean isCorrect) {}
 
     private record OcrParsed(String questionText, List<String> choices) {}
 }

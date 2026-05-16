@@ -34,8 +34,135 @@ function initialAnalytics() {
   };
 }
 
+function resolveSubmissionStartEpochMs(submission) {
+  if (!submission) return null;
+  if (submission.deadlineEpochMs != null && submission.durationMinutes != null) {
+    const fromDeadline = Number(submission.deadlineEpochMs) - Number(submission.durationMinutes) * 60_000;
+    if (Number.isFinite(fromDeadline)) return fromDeadline;
+  }
+  if (submission.startTime) {
+    const parsed = new Date(submission.startTime).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+const DRAFT_KEY_PREFIX = 'exam_draft_v1';
+const AUDIO_DRAFT_DB = 'exam_audio_drafts_v1';
+const AUDIO_DRAFT_STORE = 'recordings';
+
+function draftKeyFor(submissionId) {
+  return submissionId ? `${DRAFT_KEY_PREFIX}_${submissionId}` : null;
+}
+
+function serializeDraftAnswers(answers) {
+  const serialized = {};
+  Object.entries(answers || {}).forEach(([questionId, answer]) => {
+    if (!answer) return;
+    serialized[questionId] = {
+      answerText: answer.answerText,
+      selectedOptionId: answer.selectedOptionId,
+      speakingAudioUrl: answer.speakingAudioUrl,
+      speakingDurationSeconds: answer.speakingDurationSeconds,
+      speakingFormat: answer.speakingFormat,
+      imageUrl: answer.imageUrl,
+      localUpdatedAt: answer.localUpdatedAt,
+      hasUnsavedSpeakingBlob: answer.speakingBlob instanceof Blob,
+    };
+  });
+  return serialized;
+}
+
+function readLocalDraft(submissionId) {
+  const key = draftKeyFor(submissionId);
+  if (!key) return {};
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function clearLocalDraft(submissionId) {
+  const key = draftKeyFor(submissionId);
+  if (key) localStorage.removeItem(key);
+}
+
+function speakingDraftKey(submissionId, questionId) {
+  return `${submissionId}:${questionId}`;
+}
+
+function openAudioDraftDb() {
+  if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = indexedDB.open(AUDIO_DRAFT_DB, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(AUDIO_DRAFT_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => resolve(null);
+  });
+}
+
+async function saveSpeakingDraftBlob(submissionId, questionId, blob) {
+  if (!(blob instanceof Blob)) return;
+  const db = await openAudioDraftDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    const tx = db.transaction(AUDIO_DRAFT_STORE, 'readwrite');
+    tx.objectStore(AUDIO_DRAFT_STORE).put(blob, speakingDraftKey(submissionId, questionId));
+    tx.oncomplete = resolve;
+    tx.onerror = resolve;
+  });
+  db.close();
+}
+
+async function readSpeakingDraftBlob(submissionId, questionId) {
+  const db = await openAudioDraftDb();
+  if (!db) return null;
+  const blob = await new Promise((resolve) => {
+    const tx = db.transaction(AUDIO_DRAFT_STORE, 'readonly');
+    const request = tx.objectStore(AUDIO_DRAFT_STORE).get(speakingDraftKey(submissionId, questionId));
+    request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : null);
+    request.onerror = () => resolve(null);
+  });
+  db.close();
+  return blob;
+}
+
+async function deleteSpeakingDraftBlob(submissionId, questionId) {
+  const db = await openAudioDraftDb();
+  if (!db) return;
+  await new Promise((resolve) => {
+    const tx = db.transaction(AUDIO_DRAFT_STORE, 'readwrite');
+    tx.objectStore(AUDIO_DRAFT_STORE).delete(speakingDraftKey(submissionId, questionId));
+    tx.oncomplete = resolve;
+    tx.onerror = resolve;
+  });
+  db.close();
+}
+
+async function restoreSpeakingDraftBlobs(submissionId, answerMap, questions) {
+  const next = { ...answerMap };
+  let restoredCount = 0;
+  for (const question of questions) {
+    if ((question?.questionType || '').toUpperCase() !== 'SPEAKING') continue;
+    const blob = await readSpeakingDraftBlob(submissionId, question.id);
+    if (!blob) continue;
+    next[question.id] = {
+      ...(next[question.id] || {}),
+      speakingBlob: blob,
+      speakingAudioUrl: next[question.id]?.speakingAudioUrl,
+      speakingFormat: next[question.id]?.speakingFormat || blob.type || 'audio/webm',
+    };
+    restoredCount += 1;
+  }
+  return { answers: next, restoredCount };
+}
+
 /* ─── Question navigation sidebar ──────────────────────────────────────── */
-function QuestionNav({ questions, answers, current, onSelect }) {
+function QuestionNav({ questions, answers, current, onSelect, disabled }) {
   return (
     <nav className="w-56 shrink-0 hidden lg:block" aria-label="Question navigation">
       <div className="card sticky top-4 dark:bg-slate-900 dark:border-slate-700">
@@ -51,6 +178,7 @@ function QuestionNav({ questions, answers, current, onSelect }) {
                 key={q.id}
                 type="button"
                 onClick={() => onSelect(q.id, idx)}
+                disabled={disabled}
                 aria-label={`Question ${idx + 1}${answered ? ' (answered)' : ''}`}
                 aria-current={isCurrent ? 'step' : undefined}
                 className={`w-8 h-8 rounded-lg text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
@@ -59,7 +187,7 @@ function QuestionNav({ questions, answers, current, onSelect }) {
                     : answered
                       ? 'bg-green-500 text-white'
                       : 'bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-600 dark:bg-slate-800 dark:text-slate-300'
-                }`}
+                } disabled:cursor-not-allowed disabled:opacity-60`}
               >
                 {idx + 1}
               </button>
@@ -80,6 +208,46 @@ function QuestionNav({ questions, answers, current, onSelect }) {
 }
 
 /* ─── Answer type detection ────────────────────────────────────────────── */
+function QuestionStrip({ questions, answers, current, onSelect, disabled }) {
+  return (
+    <div className="lg:hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Questions
+        </p>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {questions.filter((q) => isAnswered(q, answers[q.id])).length}/{questions.length} answered
+        </p>
+      </div>
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {questions.map((q, idx) => {
+          const answered = isAnswered(q, answers[q.id]);
+          const isCurrent = current === q.id;
+          return (
+            <button
+              key={q.id}
+              type="button"
+              onClick={() => onSelect(q.id, idx)}
+              disabled={disabled}
+              aria-label={`Question ${idx + 1}${answered ? ' (answered)' : ''}`}
+              aria-current={isCurrent ? 'step' : undefined}
+              className={`h-9 min-w-9 rounded-lg px-3 text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                isCurrent
+                  ? 'bg-blue-600 text-white'
+                  : answered
+                    ? 'bg-green-500 text-white'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+              } disabled:cursor-not-allowed disabled:opacity-60`}
+            >
+              {idx + 1}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function isAnswered(question, value) {
   if (!value) return false;
   const type = question?.questionType?.toUpperCase() || '';
@@ -101,7 +269,7 @@ function isAnswered(question, value) {
 }
 
 /* ─── MCQ component ────────────────────────────────────────────────────── */
-function MCQuestion({ question, value, onChange }) {
+function MCQuestion({ question, value, onChange, disabled }) {
   return (
     <div className="space-y-2" role="radiogroup" aria-label="Answer options">
       {question.options?.map((opt) => (
@@ -111,13 +279,14 @@ function MCQuestion({ question, value, onChange }) {
             value?.selectedOptionId === opt.id
               ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-400'
               : 'border-slate-200 hover:border-blue-300 bg-white dark:bg-slate-800 dark:border-slate-600'
-          }`}
+          } ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
         >
           <input
             type="radio"
             name={`q-${question.id}`}
             checked={value?.selectedOptionId === opt.id}
             onChange={() => onChange({ selectedOptionId: opt.id })}
+            disabled={disabled}
             className="w-4 h-4 text-blue-600 accent-blue-600"
           />
           <span className="text-sm text-slate-700 dark:text-slate-200">{opt.optionText}</span>
@@ -245,7 +414,7 @@ function QuestionBlock({ question, value, onChange, toast, interactionLocked, su
       </p>
       {promptSrc && (
         <div className="mb-4 space-y-2">
-          <AudioPlayer src={promptSrc} disabled={interactionLocked} className="max-w-md" />
+          <AudioPlayer src={promptSrc} disabled={interactionLocked} className="max-w-2xl" />
         </div>
       )}
       <p className="text-slate-800 dark:text-slate-100 font-medium mb-4">{question.questionText}</p>
@@ -253,7 +422,7 @@ function QuestionBlock({ question, value, onChange, toast, interactionLocked, su
         {question.points} pt{question.points !== 1 ? 's' : ''}
       </p>
       {(type === 'MULTIPLE_CHOICE' || type === 'LISTENING') && (
-        <MCQuestion question={question} value={value} onChange={onChange} />
+        <MCQuestion question={question} value={value} onChange={onChange} disabled={interactionLocked} />
       )}
       {type === 'WRITING' && (
         <WritingQuestion
@@ -300,7 +469,9 @@ export default function ExamPage() {
   const [rulesAccepted, setRulesAccepted] = useState(false);
   const [isOnline, setIsOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const timerExpireRef = useRef(false);
-  const saveRef = useRef(null);
+  const saveTimersRef = useRef(new Map());
+  const dirtyAnswerIdsRef = useRef(new Set());
+  const draftHydratedRef = useRef(false);
   const submittingRef = useRef(false);
   const analyticsRef = useRef(initialAnalytics());
   const lastWarningAtRef = useRef(0);
@@ -423,6 +594,7 @@ export default function ExamPage() {
     try {
       const res = await studentExamApi.start(id);
       const sub = res.data?.data;
+      draftHydratedRef.current = false;
       setSubmission(sub);
       const endMs =
         sub.deadlineEpochMs ??
@@ -452,20 +624,61 @@ export default function ExamPage() {
               imageUrl: ans.imageUrl || undefined,
             };
           }
-          if (Object.keys(restored).length > 0) {
-            setAnswers(restored);
-            toast.info(`Restored ${Object.keys(restored).length} saved answer(s).`);
+          const localDraft = readLocalDraft(sub.id);
+          const merged = { ...restored, ...localDraft };
+          const withAudioDrafts = await restoreSpeakingDraftBlobs(sub.id, merged, allQuestions);
+          const restoredCount = Object.keys(withAudioDrafts.answers).length;
+          if (restoredCount > 0) {
+            setAnswers(withAudioDrafts.answers);
+            toast.info(`Restored ${restoredCount} saved answer(s).`);
+          }
+          if (withAudioDrafts.restoredCount > 0) {
+            toast.warning(`${withAudioDrafts.restoredCount} local speaking recording(s) will retry upload on submit.`);
           }
         } catch {
           // Non-critical: continue without restored answers
+          const localDraft = readLocalDraft(sub.id);
+          const withAudioDrafts = await restoreSpeakingDraftBlobs(sub.id, localDraft, allQuestions);
+          if (Object.keys(withAudioDrafts.answers).length > 0) {
+            setAnswers(withAudioDrafts.answers);
+            toast.info(`Restored ${Object.keys(withAudioDrafts.answers).length} local draft answer(s).`);
+          }
         }
       }
+      draftHydratedRef.current = true;
     } catch (e) {
       toast.error(e.response?.data?.message || 'Failed to start exam.');
     }
   };
 
   /* ─── Save answer (debounced) ──────────────────────────────────────── */
+  useEffect(() => {
+    if (!submission?.id || !draftHydratedRef.current) return;
+    try {
+      localStorage.setItem(
+        draftKeyFor(submission.id),
+        JSON.stringify(serializeDraftAnswers(answers))
+      );
+    } catch {
+      // Local backup is best-effort; server autosave remains the source of truth.
+    }
+  }, [answers, submission?.id]);
+
+  useEffect(() => {
+    if (!submission) return undefined;
+    const hasUnsavedLocalAudio = () =>
+      Object.values(answers).some((answer) => answer?.speakingBlob instanceof Blob);
+    const shouldWarn = () =>
+      dirtyAnswerIdsRef.current.size > 0 || saveState === 'error' || hasUnsavedLocalAudio();
+    const onBeforeUnload = (event) => {
+      if (!shouldWarn()) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [answers, saveState, submission]);
+
   const persistAnswer = useCallback(
     (questionId, data) => {
       if (!submission) return;
@@ -485,7 +698,10 @@ export default function ExamPage() {
           speakingFormat: data?.speakingFormat ?? undefined,
           imageUrl: data?.imageUrl ?? undefined,
         })
-        .then(() => setSaveState('saved'))
+        .then(() => {
+          dirtyAnswerIdsRef.current.delete(questionId);
+          setSaveState(dirtyAnswerIdsRef.current.size > 0 ? 'saving' : 'saved');
+        })
         .catch((e) => {
           setSaveState('error');
           const now = Date.now();
@@ -503,20 +719,33 @@ export default function ExamPage() {
     (questionId, data) => {
       let mergedSlice;
       setAnswers((prev) => {
-        mergedSlice = { ...(prev[questionId] || {}), ...data };
+        mergedSlice = { ...(prev[questionId] || {}), ...data, localUpdatedAt: Date.now() };
         return { ...prev, [questionId]: mergedSlice };
       });
-      if (saveRef.current) clearTimeout(saveRef.current);
-      saveRef.current = setTimeout(() => {
+      if (submission?.id) {
+        if (data?.speakingBlob instanceof Blob) {
+          saveSpeakingDraftBlob(submission.id, questionId, data.speakingBlob);
+        } else if (Object.prototype.hasOwnProperty.call(data || {}, 'speakingBlob') && data.speakingBlob == null) {
+          deleteSpeakingDraftBlob(submission.id, questionId);
+        }
+      }
+      dirtyAnswerIdsRef.current.add(questionId);
+      if (saveTimersRef.current.has(questionId)) {
+        clearTimeout(saveTimersRef.current.get(questionId));
+      }
+      const timerId = setTimeout(() => {
+        saveTimersRef.current.delete(questionId);
         persistAnswer(questionId, mergedSlice)?.catch(() => {});
       }, 600);
+      saveTimersRef.current.set(questionId, timerId);
     },
-    [persistAnswer]
+    [persistAnswer, submission?.id]
   );
 
   useEffect(
     () => () => {
-      if (saveRef.current) clearTimeout(saveRef.current);
+      saveTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+      saveTimersRef.current.clear();
     },
     []
   );
@@ -545,6 +774,7 @@ export default function ExamPage() {
       setSaveState('error');
       throw new Error(`Could not save ${failed.length} answer(s). Please retry before submitting.`);
     }
+    dirtyAnswerIdsRef.current.clear();
     setSaveState('saved');
   }, [submission]);
 
@@ -573,6 +803,7 @@ export default function ExamPage() {
           speakingDurationSeconds: uploaded.durationSeconds,
           speakingFormat: uploaded.format,
         };
+        await deleteSpeakingDraftBlob(submission.id, q.id);
       } catch (e) {
         if (!bestEffort) throw e;
         failures.push({ questionId: q.id, error: e });
@@ -595,10 +826,8 @@ export default function ExamPage() {
     if (!submission || submittingRef.current) return;
 
     // Cancel any pending debounced save before flushing (Bug fix: LOW-05)
-    if (saveRef.current) {
-      clearTimeout(saveRef.current);
-      saveRef.current = null;
-    }
+    saveTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+    saveTimersRef.current.clear();
 
     const requiredAnswers = Math.ceil(allQuestions.length * 0.5);
     if (!force && answeredCount < requiredAnswers) {
@@ -623,10 +852,11 @@ export default function ExamPage() {
         toast.warning('Time is up. Some last-second answers may not have saved, but the exam will still be submitted.');
       }
       let clientTimeSpentSeconds;
-      if (submission.startTime) {
+      const startEpochMs = resolveSubmissionStartEpochMs(submission);
+      if (startEpochMs != null) {
         clientTimeSpentSeconds = Math.max(
           0,
-          Math.floor((Date.now() - new Date(submission.startTime).getTime()) / 1000)
+          Math.floor((Date.now() - startEpochMs) / 1000)
         );
       }
       const a = analyticsRef.current;
@@ -639,6 +869,12 @@ export default function ExamPage() {
         deviceType: a.deviceType,
         deviceLabel: a.deviceLabel,
       });
+      clearLocalDraft(submission.id);
+      await Promise.all(
+        allQuestions
+          .filter((q) => (q?.questionType || '').toUpperCase() === 'SPEAKING')
+          .map((q) => deleteSpeakingDraftBlob(submission.id, q.id))
+      );
       navigate(`/result/${submission.id}`);
     } catch (e) {
       toast.error(e?.response?.data?.message || e?.message || 'Submission failed. Please try again.');
@@ -647,7 +883,7 @@ export default function ExamPage() {
       setSubmitting(false);
       setConfirmOpen(false);
     }
-  }, [submission, allQuestions.length, answeredCount, answers, flushAnswersBeforeSubmit, uploadSpeakingBeforeSubmit, navigate, toast]);
+  }, [submission, allQuestions, answeredCount, answers, flushAnswersBeforeSubmit, uploadSpeakingBeforeSubmit, navigate, toast]);
 
   const onTimerExpire = useCallback(() => {
     if (timerExpireRef.current) return;
@@ -693,6 +929,18 @@ export default function ExamPage() {
   }
 
   const pagedQuestion = pageMode === 'one' ? allQuestions[pageIndex] : null;
+  const selectQuestion = (qid, idx) => {
+    setCurrentQ(qid);
+    setPageIndex(idx);
+    if (pageMode === 'all') {
+      requestAnimationFrame(() => {
+        document.getElementById(`q-${qid}`)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'start',
+        });
+      });
+    }
+  };
 
   return (
     <div className="min-h-screen -m-6 bg-slate-50 dark:bg-slate-950 text-slate-900">
@@ -750,11 +998,12 @@ export default function ExamPage() {
           {submission && allQuestions.length > 0 && (
             <button
               type="button"
+              disabled={interactionLocked}
               onClick={() => {
                 setPageMode((m) => (m === 'all' ? 'one' : 'all'));
                 setPageIndex(allQuestions.findIndex((q) => q.id === currentQ) || 0);
               }}
-              className="text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {pageMode === 'all' ? 'One question / page' : 'Show all questions'}
             </button>
@@ -925,15 +1174,21 @@ export default function ExamPage() {
         </div>
       ) : (
         /* ─── Exam body ──────────────────────────────────────────── */
-        <div className="flex gap-6 p-6">
+        <div className="space-y-4 p-4 sm:p-6">
+          <QuestionStrip
+            questions={allQuestions}
+            answers={answers}
+            current={currentQ}
+            onSelect={selectQuestion}
+            disabled={interactionLocked}
+          />
+          <div className="flex gap-6">
           <QuestionNav
             questions={allQuestions}
             answers={answers}
             current={currentQ}
-            onSelect={(qid, idx) => {
-              setCurrentQ(qid);
-              setPageIndex(idx);
-            }}
+            onSelect={selectQuestion}
+            disabled={interactionLocked}
           />
 
           <div className="flex-1 space-y-4">
@@ -950,14 +1205,14 @@ export default function ExamPage() {
                 <div className="flex justify-between gap-3">
                   <Button
                     variant="secondary"
-                    disabled={pageIndex <= 0}
+                    disabled={interactionLocked || pageIndex <= 0}
                     onClick={() => setPageIndex((i) => Math.max(0, i - 1))}
                   >
                     &larr; Previous
                   </Button>
                   <Button
                     variant="secondary"
-                    disabled={pageIndex >= allQuestions.length - 1}
+                    disabled={interactionLocked || pageIndex >= allQuestions.length - 1}
                     onClick={() => setPageIndex((i) => Math.min(allQuestions.length - 1, i + 1))}
                   >
                     Next &rarr;
@@ -966,13 +1221,18 @@ export default function ExamPage() {
               </div>
             ) : (
               exam.sections?.map((section) => (
-                <div key={section.id}>
-                  <h2 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
-                    {section.name}
-                  </h2>
+                <section key={section.id} className="scroll-mt-28">
+                  <div className="mb-3">
+                    <h2 className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                      {section.name}
+                    </h2>
+                    <p className="text-[11px] uppercase tracking-wide text-slate-400">
+                      {section.sectionType || 'SECTION'} - {(section.questions || []).length} question{(section.questions || []).length === 1 ? '' : 's'}
+                    </p>
+                  </div>
                   <div className="space-y-4">
                     {section.questions?.map((q) => (
-                      <div key={q.id} id={`q-${q.id}`} onClick={() => setCurrentQ(q.id)} role="presentation">
+                      <div key={q.id} id={`q-${q.id}`} className="scroll-mt-32" onClick={() => setCurrentQ(q.id)} role="presentation">
                         <QuestionBlock
                           question={q}
                           value={answers[q.id]}
@@ -984,9 +1244,10 @@ export default function ExamPage() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </section>
               ))
             )}
+          </div>
           </div>
         </div>
       )}

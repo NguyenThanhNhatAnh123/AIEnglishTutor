@@ -121,14 +121,14 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
   };
 
   return (
-    <div className={`flex flex-col gap-2 min-w-[200px] ${className}`}>
+    <div className={`w-full min-w-[240px] rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900 ${className}`}>
       <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-4">
         <button
           type="button"
           onClick={toggle}
           disabled={disabled || !!loadError}
-          className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
           aria-label={playing ? 'Pause audio' : 'Play audio'}
         >
           {playing ? (
@@ -149,7 +149,7 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
             aria-valuemax={Math.round(duration || 0)}
             aria-valuenow={Math.round(current || 0)}
             aria-label="Playback position"
-            className={`h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
+            className={`h-3 rounded-full border border-slate-300 bg-slate-100 dark:border-slate-600 dark:bg-slate-800 overflow-hidden ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
             onClick={onSeek}
             onKeyDown={(e) => {
               if (disabled) return;
@@ -170,7 +170,7 @@ export default function AudioPlayer({ src, disabled = false, className = '' }) {
               style={{ width: `${pct}%` }}
             />
           </div>
-          <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400 mt-1 tabular-nums">
+          <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400 mt-1.5 tabular-nums">
             <span>{formatTime(current)}</span>
             <span>{formatTime(duration)}</span>
           </div>

@@ -1,0 +1,60 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e6]:
+      - img [ref=e8]
+      - generic [ref=e10]:
+        - paragraph [ref=e11]: AI English
+        - paragraph [ref=e12]: Teacher Portal
+    - navigation [ref=e13]:
+      - link "Dashboard" [ref=e14] [cursor=pointer]:
+        - /url: /dashboard
+        - img [ref=e15]
+        - text: Dashboard
+      - link "Classes" [ref=e17] [cursor=pointer]:
+        - /url: /classes
+        - img [ref=e18]
+        - text: Classes
+      - link "Students" [ref=e20] [cursor=pointer]:
+        - /url: /students
+        - img [ref=e21]
+        - text: Students
+      - link "Exams" [ref=e23] [cursor=pointer]:
+        - /url: /exams
+        - img [ref=e24]
+        - text: Exams
+      - link "Question Bank" [ref=e26] [cursor=pointer]:
+        - /url: /questions
+        - img [ref=e27]
+        - text: Question Bank
+      - link "OCR Workspace" [ref=e29] [cursor=pointer]:
+        - /url: /ocr
+        - img [ref=e30]
+        - text: OCR Workspace
+      - link "Results" [ref=e32] [cursor=pointer]:
+        - /url: /results
+        - img [ref=e33]
+        - text: Results
+      - link "Analytics" [ref=e35] [cursor=pointer]:
+        - /url: /analytics
+        - img [ref=e36]
+        - text: Analytics
+      - link "Profile" [ref=e38] [cursor=pointer]:
+        - /url: /profile
+        - img [ref=e39]
+        - text: Profile
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]: T
+        - generic [ref=e44]:
+          - paragraph [ref=e45]: Teacher
+          - paragraph [ref=e46]: teacher@example.com
+      - button "Sign Out" [ref=e47] [cursor=pointer]:
+        - img [ref=e48]
+        - text: Sign Out
+  - banner [ref=e50]:
+    - heading "Teacher Portal" [level=1] [ref=e51]
+    - generic [ref=e52]:
+      - generic [ref=e53]: T
+      - generic [ref=e54]: Teacher
+  - main [ref=e55]:
+    - paragraph [ref=e60]: Loading...
