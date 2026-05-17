@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { examApi, submissionApi, scoreApi } from '../services/api';
+import { teacherDashboardApi } from '../services/api';
 import Layout from '../components/Layout';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
@@ -40,52 +40,41 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    examApi.getAll()
-      .then(async (r) => {
-        const examList = r.data?.data || [];
+    teacherDashboardApi.summary()
+      .then((r) => {
+        const summary = r.data?.data || {};
+        const examList = summary.exams || [];
+        const submissions = summary.submissions || [];
         setExams(examList);
 
-        // Fetch submissions and scores per exam
-        let allScores = [];
+        const examTitleById = new Map(examList.map((exam) => [exam.id, exam.title]));
+        const scoreBuckets = new Map();
         let suspiciousTotal = 0;
         let flaggedTotal = 0;
-        const cd = [];
+        const allScores = [];
 
-        await Promise.all(
-          examList.map(async (exam) => {
-            try {
-              const subRes = await submissionApi.getByExamId(exam.id);
-              const subs = subRes.data?.data || [];
-              const submitted = subs.filter((s) => s.status === 'SUBMITTED' || s.status === 'AUTO_SUBMITTED');
-              submitted.forEach((s) => {
-                const suspicious = Number(s.suspiciousEventCount || 0);
-                suspiciousTotal += suspicious;
-                if (suspicious > 0) flaggedTotal += 1;
-              });
+        submissions.forEach((submission) => {
+          if (submission.status !== 'SUBMITTED' && submission.status !== 'AUTO_SUBMITTED') return;
 
-              const scores = [];
-              await Promise.all(
-                submitted.map(async (s) => {
-                  try {
-                    const sRes = await scoreApi.getBySubmissionId(s.id);
-                    const sc = sRes.data?.data?.totalScore;
-                    if (sc != null) scores.push(sc);
-                  } catch {
-                    return null;
-                  }
-                })
-              );
+          const suspicious = Number(submission.suspiciousEventCount || 0);
+          suspiciousTotal += suspicious;
+          if (suspicious > 0) flaggedTotal += 1;
 
-              if (scores.length > 0) {
-                const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-                cd.push({ label: exam.title, avg, count: scores.length });
-                allScores = [...allScores, ...scores];
-              }
-            } catch {
-              return null;
-            }
-          })
-        );
+          const score = submission.totalScore;
+          if (score == null) return;
+
+          const examId = submission.examId;
+          const bucket = scoreBuckets.get(examId) || { label: examTitleById.get(examId) || submission.examTitle || `Exam #${examId}`, scores: [] };
+          bucket.scores.push(Number(score));
+          scoreBuckets.set(examId, bucket);
+          allScores.push(Number(score));
+        });
+
+        const cd = Array.from(scoreBuckets.values()).map((bucket) => ({
+          label: bucket.label,
+          avg: bucket.scores.reduce((a, b) => a + b, 0) / bucket.scores.length,
+          count: bucket.scores.length,
+        }));
 
         setChartData(cd.sort((a, b) => b.avg - a.avg));
         setTotalSubmissions(allScores.length);
@@ -93,6 +82,8 @@ export default function Analytics() {
         setFlaggedSubmissions(flaggedTotal);
         if (allScores.length > 0) {
           setAvgScore((allScores.reduce((a, b) => a + b, 0) / allScores.length).toFixed(1));
+        } else {
+          setAvgScore(null);
         }
       })
       .catch(() => {})

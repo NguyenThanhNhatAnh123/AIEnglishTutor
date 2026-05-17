@@ -1,6 +1,7 @@
 package com.ai.englishsystem.result.controller;
 
 import com.ai.englishsystem.common.dto.ApiResponse;
+import com.ai.englishsystem.common.async.BoundedAsyncExecutor;
 import com.ai.englishsystem.result.dto.GenerateSpeakingReviewRequest;
 import com.ai.englishsystem.result.dto.SpeakingReviewResponse;
 import com.ai.englishsystem.result.dto.UpdateSpeakingReviewRequest;
@@ -10,22 +11,27 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.concurrent.CompletableFuture;
+
 @RestController
 @RequestMapping("/api/speaking-reviews")
 @RequiredArgsConstructor
 public class SpeakingReviewController {
 
     private final SpeakingReviewService speakingReviewService;
+    private final BoundedAsyncExecutor boundedAsyncExecutor;
 
     @PostMapping("/answers/{answerId}/generate-draft")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<SpeakingReviewResponse>> generateDraft(
+    public CompletableFuture<ResponseEntity<ApiResponse<SpeakingReviewResponse>>> generateDraft(
             @PathVariable Integer answerId,
             @RequestBody(required = false) GenerateSpeakingReviewRequest request) {
         String customPrompt = request != null ? request.getCustomPrompt() : null;
         String language = request != null ? request.getLanguage() : null;
-        SpeakingReviewResponse response = speakingReviewService.generateDraft(answerId, customPrompt, language);
-        return ResponseEntity.ok(ApiResponse.success("Draft AI speaking review generated", response));
+        return boundedAsyncExecutor.submit(() -> {
+            SpeakingReviewResponse response = speakingReviewService.generateDraft(answerId, customPrompt, language);
+            return ResponseEntity.ok(ApiResponse.success("Draft AI speaking review generated", response));
+        });
     }
 
     @PutMapping("/answers/{answerId}")

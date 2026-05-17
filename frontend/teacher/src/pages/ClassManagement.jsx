@@ -33,9 +33,10 @@ function ClassForm({ initial, onClose, onSuccess }) {
   const toast = useToast();
 
   useEffect(() => {
-    teacherApi.getAll()
+    teacherApi.getAll({ page: 0, size: 100 })
       .then((r) => {
-        const list = r.data?.data || [];
+        const data = r.data?.data;
+        const list = Array.isArray(data) ? data : (data?.items || []);
         setTeachers(list);
         if (!form.teacherId && list.length > 0) {
           setForm((f) => ({ ...f, teacherId: String(list[0].id) }));
@@ -146,14 +147,16 @@ function ClassDetailModal({ classItem, onClose, onStudentChange }) {
     try {
       const [detailRes, studentsRes] = await Promise.all([
         classApi.getById(classItem.id),
-        studentApi.getAll(),
+        studentApi.getAll({ page: 0, size: 100 }),
       ]);
       const cls = detailRes.data?.data || detailRes.data;
       setDetail(cls);
 
       // Filter out already-enrolled students
       const enrolled = new Set((cls.students || []).map((s) => s.studentId));
-      const available = (studentsRes.data?.data || []).filter((s) => !enrolled.has(s.id));
+      const studentsData = studentsRes.data?.data;
+      const studentList = Array.isArray(studentsData) ? studentsData : (studentsData?.items || []);
+      const available = studentList.filter((s) => !enrolled.has(s.id));
       setAllStudents(available);
       setSelectedStudentId(available[0]?.id ? String(available[0].id) : '');
     } catch {

@@ -3,6 +3,7 @@ package com.ai.englishsystem.submission.service;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import com.ai.englishsystem.common.exception.BadRequestException;
@@ -47,7 +48,7 @@ public class AnswerService {
         Student student = studentRepository.findByUser_Id(userId)
                 .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
 
-        Submission submission = submissionRepository.findWithAssociationsById(request.getSubmissionId())
+        Submission submission = submissionRepository.findWithAssociationsByIdForUpdate(request.getSubmissionId())
                 .orElseThrow(() -> new NotFoundException("Submission", request.getSubmissionId()));
 
         if (!submission.getStudent().getId().equals(student.getId())) {
@@ -208,13 +209,23 @@ public class AnswerService {
         if (submissionIds == null || submissionIds.isEmpty()) {
             return Map.of();
         }
+        List<Integer> uniqueSubmissionIds = submissionIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (uniqueSubmissionIds.isEmpty()) {
+            return Map.of();
+        }
+        if (uniqueSubmissionIds.size() > 200) {
+            throw new BadRequestException("Too many submissions requested at once. Please request at most 200.");
+        }
 
-        List<Submission> submissions = submissionRepository.findAllWithAssociationsByIdIn(submissionIds);
+        List<Submission> submissions = submissionRepository.findAllWithAssociationsByIdIn(uniqueSubmissionIds);
         for (Submission submission : submissions) {
             assertTeacherCanAccess(submission);
         }
 
-        List<Answer> fetchedAnswers = answerRepository.findBySubmissionIdInFetchQuestion(submissionIds);
+        List<Answer> fetchedAnswers = answerRepository.findBySubmissionIdInFetchQuestion(uniqueSubmissionIds);
         Map<Integer, Feedback> feedbackByAnswerId = feedbackRepository.findByAnswerIn(fetchedAnswers).stream()
                 .filter(f -> f.getAnswer() != null && f.getAnswer().getId() != null)
                 .collect(Collectors.toMap(f -> f.getAnswer().getId(), f -> f));
@@ -223,7 +234,7 @@ public class AnswerService {
                 .map(answer -> toResponse(answer, feedbackByAnswerId.get(answer.getId()), false))
                 .collect(Collectors.groupingBy(AnswerResponse::getSubmissionId));
 
-        for (Integer submissionId : submissionIds) {
+        for (Integer submissionId : uniqueSubmissionIds) {
             grouped.computeIfAbsent(submissionId, ignored -> List.of());
         }
 

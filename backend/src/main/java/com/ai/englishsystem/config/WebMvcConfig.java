@@ -2,6 +2,7 @@ package com.ai.englishsystem.config;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.AsyncSupportConfigurer;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -18,11 +19,19 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
 
+    @Value("${app.web.async.timeout-ms:180000}")
+    private long asyncTimeoutMs;
+
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         Path audioRoot = Paths.get(uploadDir).toAbsolutePath().normalize().resolve("audio");
         String location = "file:" + audioRoot + "/";
         registry.addResourceHandler("/uploads/audio/**")
                 .addResourceLocations(location);
+    }
+
+    @Override
+    public void configureAsyncSupport(AsyncSupportConfigurer configurer) {
+        configurer.setDefaultTimeout(Math.max(1000L, asyncTimeoutMs));
     }
 }

@@ -20,6 +20,8 @@ import {
   Progress,
 } from '../components/ui/shadcn';
 
+const ANSWER_BATCH_SIZE = 100;
+
 function formatDurationSeconds(sec) {
   if (sec == null || Number.isNaN(sec)) return '-';
   const n = Math.max(0, Math.floor(sec));
@@ -825,8 +827,15 @@ export default function StudentResults() {
     let cancelled = false;
     (async () => {
       try {
-        const r = await submissionApi.getAnswersBatch(submissions.map((s) => s.id));
-        if (!cancelled) setAnswerMap(r.data?.data || {});
+        const ids = submissions.map((s) => s.id).filter(Boolean);
+        const nextAnswerMap = {};
+        for (let i = 0; i < ids.length; i += ANSWER_BATCH_SIZE) {
+          if (cancelled) return;
+          const chunk = ids.slice(i, i + ANSWER_BATCH_SIZE);
+          const r = await submissionApi.getAnswersBatch(chunk);
+          Object.assign(nextAnswerMap, r.data?.data || {});
+        }
+        if (!cancelled) setAnswerMap(nextAnswerMap);
       } catch {
         if (!cancelled) {
           const fallback = {};

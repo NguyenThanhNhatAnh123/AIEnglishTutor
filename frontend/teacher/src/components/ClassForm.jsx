@@ -8,8 +8,11 @@ export default function ClassForm({ onClose, onSuccess }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    teacherApi.getAll()
-      .then((r) => setTeachers(r.data?.data || []))
+    teacherApi.getAll({ page: 0, size: 100 })
+      .then((r) => {
+        const data = r.data?.data;
+        setTeachers(Array.isArray(data) ? data : (data?.items || []));
+      })
       .catch(() => setTeachers([]));
   }, []);
 

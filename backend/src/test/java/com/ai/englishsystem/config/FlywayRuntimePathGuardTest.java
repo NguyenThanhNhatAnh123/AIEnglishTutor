@@ -40,7 +40,9 @@ class FlywayRuntimePathGuardTest {
                 "V4__speaking_review_transcript_fields.sql",
                 "V5__exam_type.sql",
                 "V6__exam_access_control_and_attempt_limit.sql",
-                "V7__remove_loadtest_users.sql"
+                "V7__remove_loadtest_users.sql",
+                "V8__production_performance_indexes.sql",
+                "V9__unique_answer_per_submission_question.sql"
         );
 
         Path legacyMigrationDir = Path.of("..", "database", "migrations");

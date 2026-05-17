@@ -18,6 +18,8 @@ import com.ai.englishsystem.exam.repository.ExamSectionRepository;
 import com.ai.englishsystem.exam.repository.QuestionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,6 +62,31 @@ public class QuestionService {
         return questionRepository.findByTeacherUserId(userId).stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<QuestionResponse> findAll(Integer examId, Pageable pageable) {
+        if (SecurityUtils.hasRole("ADMIN")) {
+            if (examId != null) {
+                return questionRepository.findByExamId(examId, pageable)
+                        .map(this::toResponse);
+            }
+            return questionRepository.findAllWithAssociations(pageable)
+                    .map(this::toResponse);
+        }
+        if (!SecurityUtils.hasRole("TEACHER")) {
+            throw new ForbiddenException("Access denied");
+        }
+        if (examId != null) {
+            Exam exam = examRepository.findById(examId)
+                    .orElseThrow(() -> new NotFoundException("Exam", examId));
+            assertExamOwnerOrAdmin(exam);
+            return questionRepository.findByExamId(examId, pageable)
+                    .map(this::toResponse);
+        }
+        Integer userId = SecurityUtils.getCurrentUserId();
+        return questionRepository.findByTeacherUserId(userId, pageable)
+                .map(this::toResponse);
     }
 
     @Transactional

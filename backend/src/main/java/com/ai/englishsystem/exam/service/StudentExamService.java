@@ -38,10 +38,12 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -66,9 +68,24 @@ public class StudentExamService {
     @Transactional(readOnly = true)
     public List<ExamResponse> getActiveExams() {
         Student student = resolveCurrentStudent();
-        return examRepository.findByStatusWithTeacher("ACTIVE").stream()
-                .filter(exam -> canStudentAccessExam(student, exam))
-                .filter(this::isReadyForTaking)
+        List<Exam> activeExams = examRepository.findByStatusWithTeacher("ACTIVE");
+        if (activeExams.isEmpty()) {
+            return List.of();
+        }
+
+        List<Integer> examIds = activeExams.stream().map(Exam::getId).toList();
+        Set<Integer> studentClassIds = new HashSet<>(classStudentRepository.findClassIdsByStudentId(student.getId()));
+        Map<Integer, ContentCounts> contentCountsByExamId = loadContentCounts(examIds);
+        Map<Integer, Long> completedAttemptsByExamId = loadCompletedAttempts(examIds, student.getId());
+        Set<Integer> inProgressExamIds = new HashSet<>(submissionRepository.findExamIdsByStudentAndStatus(
+                examIds,
+                student.getId(),
+                SubmissionStatus.IN_PROGRESS
+        ));
+
+        return activeExams.stream()
+                .filter(exam -> canStudentAccessExam(studentClassIds, exam))
+                .filter(exam -> contentCountsByExamId.getOrDefault(exam.getId(), ContentCounts.empty()).questionCount() > 0)
                 .map(exam -> ExamResponse.builder()
                         .id(exam.getId())
                         .title(exam.getTitle())
@@ -79,11 +96,11 @@ public class StudentExamService {
                         .status(exam.getStatus())
                         .examType(exam.getExamType() != null ? exam.getExamType().name() : ExamType.PRACTICE.name())
                         .maxAttempts(exam.getMaxAttempts())
-                        .completedAttempts(completedAttempts(exam, student))
-                        .remainingAttempts(remainingAttempts(exam, student))
-                        .hasInProgressSubmission(hasInProgressSubmission(exam, student))
-                        .sectionCount(sectionsOf(exam).size())
-                        .questionCount(questionCount(exam))
+                        .completedAttempts(completedAttemptsByExamId.getOrDefault(exam.getId(), 0L))
+                        .remainingAttempts(remainingAttempts(exam, completedAttemptsByExamId.getOrDefault(exam.getId(), 0L)))
+                        .hasInProgressSubmission(inProgressExamIds.contains(exam.getId()))
+                        .sectionCount(contentCountsByExamId.getOrDefault(exam.getId(), ContentCounts.empty()).sectionCount())
+                        .questionCount(contentCountsByExamId.getOrDefault(exam.getId(), ContentCounts.empty()).questionCount())
                         .createdAt(exam.getCreatedAt())
                         .build())
                 .collect(Collectors.toList());
@@ -91,7 +108,7 @@ public class StudentExamService {
 
     @Transactional
     public SubmissionResponse startExam(Integer examId) {
-        Student student = resolveCurrentStudent();
+        Student student = lockCurrentStudent();
         Exam exam = examRepository.findById(examId)
                 .orElseThrow(() -> new NotFoundException("Exam", examId));
 
@@ -175,7 +192,7 @@ public class StudentExamService {
     @Transactional
     public StudentSubmitExamResponse submitExam(Integer submissionId, SubmitExamRequest submitRequest) {
         Student student = resolveCurrentStudent();
-        Submission submission = submissionRepository.findWithAssociationsById(submissionId)
+        Submission submission = submissionRepository.findWithAssociationsByIdForUpdate(submissionId)
                 .orElseThrow(() -> new NotFoundException("Submission", submissionId));
 
         if (!submission.getStudent().getId().equals(student.getId())) {
@@ -308,6 +325,12 @@ public class StudentExamService {
                 .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
     }
 
+    private Student lockCurrentStudent() {
+        Student student = resolveCurrentStudent();
+        return studentRepository.findByIdForUpdate(student.getId())
+                .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
+    }
+
     private void assertExamAvailable(Exam exam) {
         if (!"ACTIVE".equals(exam.getStatus())) {
             throw new BadRequestException("Exam is not available for taking");
@@ -367,11 +390,13 @@ public class StudentExamService {
     }
 
     private boolean canStudentAccessExam(Student student, Exam exam) {
+        return canStudentAccessExam(new HashSet<>(classStudentRepository.findClassIdsByStudentId(student.getId())), exam);
+    }
+
+    private boolean canStudentAccessExam(Set<Integer> studentClassIds, Exam exam) {
         if (exam.getAllowedClasses() == null || exam.getAllowedClasses().isEmpty()) {
             return true;
         }
-        List<Integer> classIds = classStudentRepository.findClassIdsByStudentId(student.getId());
-        Set<Integer> studentClassIds = new HashSet<>(classIds);
         if (studentClassIds.isEmpty()) {
             return false;
         }
@@ -469,12 +494,38 @@ public class StudentExamService {
     }
 
     private Integer remainingAttempts(Exam exam, Student student) {
+        return remainingAttempts(exam, completedAttempts(exam, student));
+    }
+
+    private Integer remainingAttempts(Exam exam, long completed) {
         Integer maxAttempts = effectiveMaxAttempts(exam);
         if (maxAttempts == null) {
             return null;
         }
-        long completed = completedAttempts(exam, student);
         return Math.max(0, maxAttempts - (int) Math.min(completed, Integer.MAX_VALUE));
+    }
+
+    private Map<Integer, ContentCounts> loadContentCounts(List<Integer> examIds) {
+        Map<Integer, ContentCounts> out = new HashMap<>();
+        for (Object[] row : examRepository.findContentCountsByExamIds(examIds)) {
+            Integer examId = (Integer) row[0];
+            int sectionCount = ((Number) row[1]).intValue();
+            int questionCount = ((Number) row[2]).intValue();
+            out.put(examId, new ContentCounts(sectionCount, questionCount));
+        }
+        return out;
+    }
+
+    private Map<Integer, Long> loadCompletedAttempts(List<Integer> examIds, Integer studentId) {
+        Map<Integer, Long> out = new HashMap<>();
+        for (Object[] row : submissionRepository.countByExamIdsAndStudentAndStatusIn(
+                examIds,
+                studentId,
+                EnumSet.of(SubmissionStatus.SUBMITTED, SubmissionStatus.AUTO_SUBMITTED)
+        )) {
+            out.put((Integer) row[0], ((Number) row[1]).longValue());
+        }
+        return out;
     }
 
     private Integer effectiveMaxAttempts(Exam exam) {
@@ -667,6 +718,12 @@ public class StudentExamService {
 
         private double completionRatio() {
             return completionRatio;
+        }
+    }
+
+    private record ContentCounts(int sectionCount, int questionCount) {
+        static ContentCounts empty() {
+            return new ContentCounts(0, 0);
         }
     }
 }

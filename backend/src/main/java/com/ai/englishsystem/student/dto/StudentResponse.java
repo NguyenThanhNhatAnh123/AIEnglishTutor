@@ -15,6 +15,7 @@ import java.time.LocalDateTime;
 public class StudentResponse {
     private Integer id;
     private Integer userId;
+    private String username;
     private String studentCode;
     private String fullName;
     private String email;

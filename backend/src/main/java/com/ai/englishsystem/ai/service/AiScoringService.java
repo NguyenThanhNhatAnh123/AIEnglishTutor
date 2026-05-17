@@ -89,6 +89,9 @@ public class AiScoringService {
     @Value("${app.ai.http.total-timeout-seconds:170}")
     private int httpTotalTimeoutSeconds;
 
+    @Value("${app.ai.log.max-body-chars:12000}")
+    private int aiLogMaxBodyChars;
+
     /** Shared, reusable HttpClient instance (created once, reused across calls). */
     private volatile HttpClient sharedHttpClient;
 
@@ -856,13 +859,24 @@ public class AiScoringService {
                 .provider("DEEPSEEK")
                 .model(deepSeekModel)
                 .endpoint(endpoint)
-                .requestPayload(payload)
-                .responseBody(response != null ? response.body() : null)
+                .requestPayload(trimForAiLog(payload))
+                .responseBody(response != null ? trimForAiLog(response.body()) : null)
                 .httpStatus(response != null ? response.statusCode() : null)
                 .successFlag(success)
                 .latencyMs(latencyMs)
-                .errorMessage(trimToNull(errorMessage))
+                .errorMessage(trimForAiLog(trimToNull(errorMessage)))
                 .build());
+    }
+
+    private String trimForAiLog(String value) {
+        if (value == null) {
+            return null;
+        }
+        int max = Math.max(1000, aiLogMaxBodyChars);
+        if (value.length() <= max) {
+            return value;
+        }
+        return value.substring(0, max) + "\n...[truncated]";
     }
 
     private static String trimToNull(String value) {

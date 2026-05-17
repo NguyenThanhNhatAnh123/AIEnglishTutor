@@ -5,8 +5,11 @@ export default function StudentTable() {
   const [students, setStudents] = useState([]);
 
   useEffect(() => {
-    studentApi.getAll()
-      .then((r) => setStudents(r.data?.data || []))
+    studentApi.getAll({ page: 0, size: 5 })
+      .then((r) => {
+        const data = r.data?.data;
+        setStudents(Array.isArray(data) ? data : (data?.items || []));
+      })
       .catch(() => setStudents([]));
   }, []);
 
@@ -23,7 +26,7 @@ export default function StudentTable() {
           </tr>
         </thead>
         <tbody>
-          {students.slice(0, 5).map((s) => (
+          {students.map((s) => (
             <tr key={s.id} className="text-slate-300 border-t border-slate-700">
               <td className="py-2">{s.studentCode}</td>
               <td className="py-2">{s.fullName}</td>

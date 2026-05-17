@@ -61,7 +61,7 @@ export const roleApi = {
 };
 
 export const userApi = {
-  getAll: () => api.get('/users'),
+  getAll: (params) => api.get('/users', { params }),
   getById: (id) => api.get(`/users/${id}`),
   create: (data) => api.post('/users', data),
   update: (id, data) => api.put(`/users/${id}`, data),
@@ -69,7 +69,7 @@ export const userApi = {
 };
 
 export const studentApi = {
-  getAll: () => api.get('/students'),
+  getAll: (params) => api.get('/students', { params }),
   getById: (id) => api.get(`/students/${id}`),
   create: (data) => api.post('/students', data),
   update: (id, data) => api.put(`/students/${id}`, data),
@@ -77,8 +77,12 @@ export const studentApi = {
 };
 
 export const teacherApi = {
-  getAll: () => api.get('/teachers'),
+  getAll: (params) => api.get('/teachers', { params }),
   create: (data) => api.post('/teachers', data),
+};
+
+export const teacherDashboardApi = {
+  summary: () => api.get('/teacher/dashboard/summary'),
 };
 
 export const classApi = {
@@ -110,8 +114,8 @@ export const examSectionApi = {
 };
 
 export const questionApi = {
-  getAll: (examId) =>
-    api.get('/questions', { params: examId != null && examId !== '' ? { examId } : {} }),
+  getAll: (examId, params = {}) =>
+    api.get('/questions', { params: { ...(examId != null && examId !== '' ? { examId } : {}), ...params } }),
   create: (data) => api.post('/questions', data),
   createBulk: (questions) => api.post('/questions/bulk', { questions }),
   update: (id, data) => api.put(`/questions/${id}`, data),

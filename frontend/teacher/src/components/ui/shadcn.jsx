@@ -5,7 +5,7 @@ const cn = (...classes) => classes.filter(Boolean).join(' ');
 export function Card({ className = '', children, ...props }) {
   return (
     <div
-      className={cn('rounded-lg border border-slate-200 bg-white text-slate-950 shadow-sm', className)}
+      className={cn('rounded-lg border border-white/70 bg-white/75 text-slate-950 shadow-panel backdrop-blur-xl', className)}
       {...props}
     >
       {children}
@@ -23,7 +23,7 @@ export function CardHeader({ className = '', children, ...props }) {
 
 export function CardTitle({ className = '', children, ...props }) {
   return (
-    <h3 className={cn('text-base font-semibold leading-none tracking-normal text-slate-950', className)} {...props}>
+    <h3 className={cn('text-base font-semibold leading-tight tracking-normal text-slate-950', className)} {...props}>
       {children}
     </h3>
   );
@@ -71,9 +71,9 @@ export function Badge({ variant = 'default', className = '', children, ...props 
 
 export function Button({ variant = 'default', size = 'default', className = '', asChild = false, children, ...props }) {
   const variants = {
-    default: 'bg-slate-900 text-white hover:bg-slate-800',
+    default: 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white shadow-glow hover:from-indigo-600 hover:to-violet-600',
     secondary: 'bg-slate-100 text-slate-900 hover:bg-slate-200',
-    outline: 'border border-slate-200 bg-white hover:bg-slate-50',
+    outline: 'border border-white/70 bg-white/75 hover:bg-white',
     ghost: 'hover:bg-slate-100 text-slate-700',
     destructive: 'bg-rose-600 text-white hover:bg-rose-700',
   };
@@ -83,7 +83,7 @@ export function Button({ variant = 'default', size = 'default', className = '', 
     icon: 'h-9 w-9',
   };
   const resolvedClassName = cn(
-    'inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
+    'inline-flex items-center justify-center gap-2 rounded-lg text-sm font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 disabled:pointer-events-none disabled:opacity-50',
     variants[variant] || variants.default,
     sizes[size] || sizes.default,
     className

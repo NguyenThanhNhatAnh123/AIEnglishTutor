@@ -20,10 +20,13 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.web.servlet.MvcResult;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -103,11 +106,15 @@ class AiControllerSecurityTest {
         given(imageOcrTtsService.processImage(any())).willReturn(ocr);
         given(questionService.create(any())).willReturn(question);
 
-        mockMvc.perform(multipart("/api/ai/ocr-to-question")
+        MvcResult result = mockMvc.perform(multipart("/api/ai/ocr-to-question")
                         .file(file)
                         .param("sectionId", "1")
                         .param("points", "1")
                         .param("correctChoiceIndex", "0"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(result))
                 .andExpect(status().isOk());
     }
 }

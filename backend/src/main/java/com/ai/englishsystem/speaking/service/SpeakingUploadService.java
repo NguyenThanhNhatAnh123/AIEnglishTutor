@@ -23,7 +23,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -62,6 +62,7 @@ public class SpeakingUploadService {
     private final FfmpegAudioService ffmpegAudioService;
     private final AnswerRepository answerRepository;
     private final SpeakingFileStorage speakingFileStorage;
+    private final TransactionTemplate transactionTemplate;
 
     @Value("${app.upload.dir:uploads}")
     private String uploadDir;
@@ -69,7 +70,6 @@ public class SpeakingUploadService {
     @Value("${app.speaking.upload-grace-seconds:180}")
     private int uploadGraceSeconds;
 
-    @Transactional
     public SpeakingUploadResponse upload(Integer submissionId, Integer questionId, MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new BadRequestException("File is empty");
@@ -131,7 +131,10 @@ public class SpeakingUploadService {
 
             int duration = ffmpegAudioService.probeDurationSeconds(outMp3);
             String url = "/uploads/audio/speaking/" + outMp3.getFileName();
-            persistSpeakingAnswer(submission, question, url, duration);
+            String previousUrl = transactionTemplate.execute(status -> persistSpeakingAnswer(submission, question, url, duration));
+            if (previousUrl != null && !previousUrl.equals(url)) {
+                speakingFileStorage.deleteIfExists(previousUrl);
+            }
             log.info("Speaking audio stored as mp3: {}", url);
             return SpeakingUploadResponse.builder()
                     .url(url)
@@ -162,10 +165,12 @@ public class SpeakingUploadService {
         }
     }
 
-    private void persistSpeakingAnswer(Submission submission, Question question, String url, int duration) {
-        Answer answer = answerRepository.findBySubmissionAndQuestion(submission, question)
+    private String persistSpeakingAnswer(Submission submission, Question question, String url, int duration) {
+        Submission lockedSubmission = submissionRepository.findWithAssociationsByIdForUpdate(submission.getId())
+                .orElseThrow(() -> new NotFoundException("Submission", submission.getId()));
+        Answer answer = answerRepository.findBySubmissionAndQuestion(lockedSubmission, question)
                 .orElseGet(() -> Answer.builder()
-                        .submission(submission)
+                        .submission(lockedSubmission)
                         .question(question)
                         .build());
         String previousUrl = answer.getSpeakingAudioUrl();
@@ -173,9 +178,7 @@ public class SpeakingUploadService {
         answer.setSpeakingDurationSeconds(duration);
         answer.setSpeakingFormat("mp3");
         answerRepository.save(answer);
-        if (previousUrl != null && !previousUrl.equals(url)) {
-            speakingFileStorage.deleteIfExists(previousUrl);
-        }
+        return previousUrl;
     }
 
     private void assertWithinUploadWindow(Submission submission) {

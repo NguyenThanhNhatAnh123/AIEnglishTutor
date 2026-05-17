@@ -1,6 +1,7 @@
 package com.ai.englishsystem.result.service;
 
 import com.ai.englishsystem.ai.dto.WritingScoreRequest;
+import com.ai.englishsystem.ai.service.AiConcurrencyLimiter;
 import com.ai.englishsystem.ai.service.AiScoringService;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
@@ -32,16 +33,17 @@ public class WritingReviewService {
     private final FeedbackRepository feedbackRepository;
     private final ScoreRepository scoreRepository;
     private final AiScoringService aiScoringService;
+    private final AiConcurrencyLimiter aiConcurrencyLimiter;
 
     public WritingReviewResponse generateDraft(Integer answerId, String customPrompt) {
         Answer answer = loadWritingAnswer(answerId);
         assertTeacherOwnership(answer);
 
-        var ai = aiScoringService.scoreWriting(WritingScoreRequest.builder()
+        var ai = aiConcurrencyLimiter.run(() -> aiScoringService.scoreWriting(WritingScoreRequest.builder()
                 .answerId(answerId)
                 .essayText(answer.getAnswerText())
                 .customPrompt(customPrompt)
-                .build(), true);
+                .build(), true));
 
         Feedback feedback = feedbackRepository.findByAnswer(answer)
                 .orElseGet(() -> Feedback.builder().answer(answer).build());

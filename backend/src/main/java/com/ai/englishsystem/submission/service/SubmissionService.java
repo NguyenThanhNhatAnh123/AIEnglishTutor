@@ -33,6 +33,8 @@ import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.net.MalformedURLException;
 import java.time.ZoneId;
@@ -331,11 +333,14 @@ public class SubmissionService {
         }
 
         List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
-        for (Answer a : answers) {
-            feedbackRepository.findByAnswer(a).ifPresent(feedbackRepository::delete);
-            aiResultRepository.findByAnswer(a).ifPresent(aiResultRepository::delete);
-            speakingFileStorage.deleteIfExists(a.getSpeakingAudioUrl());
+        if (!answers.isEmpty()) {
+            feedbackRepository.deleteByAnswerIn(answers);
+            aiResultRepository.deleteByAnswerIn(answers);
         }
+        deleteSpeakingFilesAfterCommit(answers.stream()
+                .map(Answer::getSpeakingAudioUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .toList());
         scoreRepository.findFirstBySubmissionOrderByIdAsc(submission).ifPresent(scoreRepository::delete);
         // Delete suspicious events BEFORE deleting submission (Bug #4 fix)
         submissionSuspiciousEventRepository.deleteBySubmission(submission);
@@ -388,6 +393,23 @@ public class SubmissionService {
 
     public String speakingDownloadFilename(Integer answerId) {
         return "speaking-answer-" + answerId + ".mp3";
+    }
+
+    private void deleteSpeakingFilesAfterCommit(List<String> urls) {
+        if (urls == null || urls.isEmpty()) {
+            return;
+        }
+        Runnable deleteFiles = () -> urls.forEach(speakingFileStorage::deleteIfExists);
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            deleteFiles.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                deleteFiles.run();
+            }
+        });
     }
 
     private record SubmissionReviewOverview(

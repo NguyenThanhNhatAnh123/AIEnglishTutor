@@ -2,6 +2,7 @@ package com.ai.englishsystem.result.service;
 
 import com.ai.englishsystem.ai.dto.AiScoreResponse;
 import com.ai.englishsystem.ai.dto.SpeakingScoreRequest;
+import com.ai.englishsystem.ai.service.AiConcurrencyLimiter;
 import com.ai.englishsystem.ai.service.AiScoringService;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
@@ -35,27 +36,29 @@ public class SpeakingReviewService {
     private final ScoreRepository scoreRepository;
     private final AiScoringService aiScoringService;
     private final SpeakingFileStorage speakingFileStorage;
+    private final AiConcurrencyLimiter aiConcurrencyLimiter;
 
     public SpeakingReviewResponse generateDraft(Integer answerId, String customPrompt, String language) {
         Answer answer = loadSpeakingAnswer(answerId);
         assertTeacherOwnership(answer);
 
-        String transcript = aiScoringService.transcribeSpeakingAudio(
+        String transcript = aiConcurrencyLimiter.run(() -> aiScoringService.transcribeSpeakingAudio(
                 speakingFileStorage.resolveFromPublicUrl(answer.getSpeakingAudioUrl()),
                 language
-        );
+        ));
         String cleanedTranscript = hasText(transcript) ? transcript.trim() : null;
 
         // Only score when we actually have a transcript.
         // If STT fails, teacher can still edit transcript manually.
         AiScoreResponse ai = null;
         if (hasText(cleanedTranscript)) {
-            ai = aiScoringService.scoreSpeaking(SpeakingScoreRequest.builder()
+            String transcriptForScoring = cleanedTranscript;
+            ai = aiConcurrencyLimiter.run(() -> aiScoringService.scoreSpeaking(SpeakingScoreRequest.builder()
                     .answerId(answerId)
                     .audioUrl(answer.getSpeakingAudioUrl())
                     .customPrompt(customPrompt)
-                    .transcriptText(cleanedTranscript)
-                    .build(), true);
+                    .transcriptText(transcriptForScoring)
+                    .build(), true));
         }
 
         if (!hasText(cleanedTranscript)) {

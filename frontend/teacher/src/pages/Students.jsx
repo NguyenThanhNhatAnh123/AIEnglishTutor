@@ -21,6 +21,21 @@ function fmtDate(value) {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+const STUDENT_PAGE_SIZE = 25;
+
+function readPagedData(response) {
+  const data = response.data?.data;
+  if (Array.isArray(data)) {
+    return { items: data, page: 0, totalPages: 1, totalItems: data.length };
+  }
+  return {
+    items: data?.items || [],
+    page: data?.page || 0,
+    totalPages: data?.totalPages || 0,
+    totalItems: data?.totalItems || 0,
+  };
+}
+
 function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
   const toast = useToast();
   const [loading, setLoading] = useState(false);
@@ -174,31 +189,32 @@ function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
 export default function Students() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [userMap, setUserMap] = useState(new Map());
   const [studentRoleId, setStudentRoleId] = useState(null);
   const [modal, setModal] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [pageInfo, setPageInfo] = useState({ page: 0, totalPages: 0, totalItems: 0 });
   const toast = useToast();
 
   const load = useCallback(() => {
     setLoading(true);
-    Promise.all([studentApi.getAll(), userApi.getAll(), roleApi.getAll()])
-      .then(([sRes, uRes, rolesRes]) => {
-        setRows(sRes.data?.data || []);
-        const users = uRes.data?.data || [];
-        setUserMap(new Map(users.map((u) => [u.id, u.username])));
+    Promise.all([studentApi.getAll({ page, size: STUDENT_PAGE_SIZE }), roleApi.getAll()])
+      .then(([sRes, rolesRes]) => {
+        const next = readPagedData(sRes);
+        setRows(next.items);
+        setPageInfo({ page: next.page, totalPages: next.totalPages, totalItems: next.totalItems });
         const roles = rolesRes.data?.data || [];
         const studentRole = roles.find((r) => r.name === 'STUDENT');
         if (studentRole?.id) setStudentRoleId(studentRole.id);
       })
       .catch(() => {
         setRows([]);
-        setUserMap(new Map());
+        setPageInfo({ page: 0, totalPages: 0, totalItems: 0 });
         toast.error('Failed to load students');
       })
       .finally(() => setLoading(false));
-  }, [toast]);
+  }, [page, toast]);
 
   useEffect(() => {
     load();
@@ -238,6 +254,26 @@ export default function Students() {
           <EmptyState title="No students yet" description="Create a student account, then add them to a class." />
         ) : (
           <div className="card overflow-hidden !p-0 overflow-x-auto">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 text-xs text-slate-500">
+              <span>
+                Page {pageInfo.totalPages === 0 ? 0 : pageInfo.page + 1} of {pageInfo.totalPages}
+                {pageInfo.totalItems ? ` - ${pageInfo.totalItems} total` : ''}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="sm" type="button" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                  Previous
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  disabled={pageInfo.totalPages === 0 || page >= pageInfo.totalPages - 1}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
             <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
@@ -255,7 +291,7 @@ export default function Students() {
                   <tr key={s.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-xs text-blue-700">{s.studentCode}</td>
                     <td className="px-4 py-3 font-medium text-slate-800">{s.fullName || '—'}</td>
-                    <td className="px-4 py-3 text-slate-500">@{userMap.get(s.userId) || '—'}</td>
+                    <td className="px-4 py-3 text-slate-500">@{s.username || '—'}</td>
                     <td className="px-4 py-3 text-slate-500 text-xs">{s.email}</td>
                     <td className="px-4 py-3 text-slate-500 text-xs">{fmtDate(s.dateOfBirth)}</td>
                     <td className="px-4 py-3 text-slate-400 text-xs">{fmtDate(s.createdAt)}</td>

@@ -32,7 +32,7 @@ public class AsyncConfig {
 
     /**
      * Dedicated executor for AI scoring operations (DeepSeek, Whisper, OCR, TTS).
-     * Uses CallerRunsPolicy to gracefully degrade under extreme load instead of rejecting.
+     * Rejects overload so long-running work never falls back onto Tomcat request threads.
      */
     @Bean(name = "aiScoringExecutor")
     public Executor aiScoringExecutor() {
@@ -42,7 +42,7 @@ public class AsyncConfig {
         executor.setQueueCapacity(queueCapacity);
         executor.setKeepAliveSeconds(120);
         executor.setThreadNamePrefix("ai-scoring-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(60);
         executor.initialize();
@@ -63,7 +63,7 @@ public class AsyncConfig {
         executor.setQueueCapacity(50);
         executor.setKeepAliveSeconds(60);
         executor.setThreadNamePrefix("bg-task-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
         executor.initialize();

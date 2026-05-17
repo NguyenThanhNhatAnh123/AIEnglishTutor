@@ -103,6 +103,9 @@ public class ImageOcrTtsService {
     @Value("${app.ai.ocr-json.timeout-seconds:20}")
     private int ocrJsonTimeoutSeconds;
 
+    @Value("${app.ai.tts.max-text-chars:5000}")
+    private int ttsMaxTextChars;
+
     /** Shared, reusable HttpClient instance (created once, reused across calls). */
     private volatile HttpClient httpClient;
 
@@ -252,6 +255,9 @@ public class ImageOcrTtsService {
         String cleanText = normalizeWhitespace(text);
         if (cleanText.isBlank()) {
             throw new BadRequestException("text cannot be blank");
+        }
+        if (cleanText.length() > Math.max(100, ttsMaxTextChars)) {
+            throw new BadRequestException("text exceeds maximum TTS length");
         }
         Instant deadlineAt = Instant.now().plusSeconds(Math.max(20, httpTotalTimeoutSeconds));
         String unique = UUID.randomUUID().toString().replace("-", "");

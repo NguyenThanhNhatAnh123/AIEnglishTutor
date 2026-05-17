@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,500&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -10,9 +10,23 @@
   }
 
   body {
-    font-family: 'DM Sans', system-ui, sans-serif;
-    background: #f6f8fb;
-    color: #374151;
+    font-family: 'Plus Jakarta Sans', Inter, system-ui, sans-serif;
+    background: #f7f7f8;
+    color: #111827;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    text-rendering: optimizeLegibility;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid #6366f1;
+    outline-offset: 2px;
   }
 
   ::-webkit-scrollbar {
@@ -26,54 +40,37 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #bfdbfe;
+    background: #c7d2fe;
     border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #3b82f6;
+    background: #6366f1;
   }
 }
 
 @layer components {
   .sidebar-link {
-    @apply relative flex items-center gap-3 px-4 py-2.5 rounded-xl text-slate-600 hover:text-slate-900 transition-all duration-200 text-sm font-medium;
-    @apply hover:bg-white/60;
-    @apply hover:shadow-[0_2px_8px_rgba(0,0,0,0.05)];
+    @apply flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-medium text-slate-600 transition-colors duration-150 hover:bg-slate-100 hover:text-slate-950;
   }
 
   .sidebar-link.active {
-    @apply bg-blue-50 text-slate-900 shadow-[0_2px_8px_rgba(0,0,0,0.05)];
-    @apply ring-1 ring-blue-100;
+    @apply bg-[#ECECEC] font-semibold text-slate-950;
   }
 
-  /* Subtle blue accent bar for active item */
-  .sidebar-link.active::before {
-    content: '';
-    position: absolute;
-    left: 10px;
-    top: 10px;
-    bottom: 10px;
-    width: 3px;
-    border-radius: 9999px;
-    background: #2563eb; /* blue-600 accent */
-  }
-
-  /* Icon accent on hover/active (subtle) */
   .sidebar-link svg {
-    color: #64748b; /* slate-500 */
-    transition: color 200ms ease, transform 200ms ease;
+    color: #6b7280;
+    transition: color 150ms ease;
   }
   .sidebar-link:hover svg {
-    color: #2563eb;
-    transform: translateY(-1px);
+    color: #111827;
   }
   .sidebar-link.active svg {
-    color: #2563eb;
+    color: #111827;
   }
 
   .card {
-    @apply bg-white rounded-2xl shadow-sm border border-slate-100 p-5;
+    @apply rounded-lg border border-white/70 bg-white/75 p-5 shadow-panel backdrop-blur-xl;
   }
 
   .page-title {
@@ -105,7 +102,7 @@
 }
 
 .skeleton {
-  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background: linear-gradient(90deg, #e5e7eb 25%, #f8fafc 50%, #e5e7eb 75%);
   background-size: 200% 100%;
   animation: shimmer 1.4s infinite;
   border-radius: 8px;

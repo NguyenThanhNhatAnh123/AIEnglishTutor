@@ -15,6 +15,8 @@ import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +45,12 @@ public class StudentService {
         return studentRepository.findAll().stream()
                 .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<StudentResponse> findAll(Pageable pageable) {
+        return studentRepository.findAllBy(pageable)
+                .map(this::toResponse);
     }
 
     @Transactional
@@ -126,6 +134,7 @@ public class StudentService {
         return StudentResponse.builder()
                 .id(student.getId())
                 .userId(student.getUser().getId())
+                .username(student.getUser().getUsername())
                 .studentCode(student.getStudentCode())
                 .fullName(student.getUser().getFullName())
                 .email(student.getUser().getEmail())

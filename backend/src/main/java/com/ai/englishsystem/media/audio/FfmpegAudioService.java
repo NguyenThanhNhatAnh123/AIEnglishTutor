@@ -8,12 +8,14 @@ import org.springframework.stereotype.Service;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -48,7 +50,6 @@ public class FfmpegAudioService {
         cmd.add(outputMp3.toAbsolutePath().toString());
         runProcess(cmd, "ffmpeg transcode");
 
-        // Files.size() throws IOException — must be caught
         try {
             if (!Files.exists(outputMp3) || Files.size(outputMp3) == 0) {
                 throw new BadRequestException("FFmpeg produced no output; check server FFmpeg installation");
@@ -82,9 +83,9 @@ public class FfmpegAudioService {
     }
 
     private void runProcess(List<String> command, String label) {
-        String err = runProcessCaptureStreams(command, label, false);
-        if (err != null && !err.isBlank()) {
-            log.debug("{} stderr: {}", label, err);
+        String output = runProcessCaptureStreams(command, label, false);
+        if (output != null && !output.isBlank()) {
+            log.debug("{} output: {}", label, output);
         }
     }
 
@@ -94,47 +95,47 @@ public class FfmpegAudioService {
 
     private String runProcessCaptureStreams(List<String> command, String label, boolean captureStdout) {
         ProcessBuilder pb = new ProcessBuilder(command);
-        pb.redirectErrorStream(false);
+        pb.redirectErrorStream(true);
+        ExecutorService streamExecutor = Executors.newSingleThreadExecutor();
         try {
-            Process p = pb.start();
-            String stdout = "";
-            if (captureStdout) {
-                try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = r.readLine()) != null) {
-                        sb.append(line);
-                    }
-                    stdout = sb.toString();
-                }
-            } else {
-                p.getInputStream().transferTo(OutputStream.nullOutputStream());
-            }
-            String stderr;
-            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = r.readLine()) != null) {
-                    sb.append(line).append('\n');
-                }
-                stderr = sb.toString();
-            }
-            boolean finished = p.waitFor(120, TimeUnit.SECONDS);
+            Process process = pb.start();
+            Future<String> outputFuture = streamExecutor.submit(() -> readProcessOutput(process, captureStdout));
+
+            boolean finished = process.waitFor(120, TimeUnit.SECONDS);
             if (!finished) {
-                p.destroyForcibly();
-                throw new BadRequestException(label + " timed out — is FFmpeg installed?");
+                process.destroyForcibly();
+                outputFuture.cancel(true);
+                throw new BadRequestException(label + " timed out - is FFmpeg installed?");
             }
-            int code = p.exitValue();
+
+            String output = outputFuture.get(5, TimeUnit.SECONDS);
+            int code = process.exitValue();
             if (code != 0) {
-                log.warn("{} failed exit={} stderr={}", label, code, stderr);
+                log.warn("{} failed exit={} output={}", label, code, output);
                 throw new BadRequestException(label + " failed (exit " + code + "). Ensure FFmpeg is on PATH.");
             }
-            return stdout;
+            return output;
         } catch (BadRequestException e) {
             throw e;
         } catch (Exception e) {
             log.error(label + " error", e);
             throw new BadRequestException(label + " failed: " + e.getMessage());
+        } finally {
+            streamExecutor.shutdownNow();
+        }
+    }
+
+    private String readProcessOutput(Process process, boolean captureOutput) throws IOException {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+            StringBuilder output = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (captureOutput || output.length() < 4096) {
+                    output.append(line).append('\n');
+                }
+            }
+            return output.toString().trim();
         }
     }
 }

@@ -15,6 +15,21 @@ const MC_DEFAULTS = () => [
   { optionText: '', isCorrect: false },
 ];
 
+const QUESTION_PAGE_SIZE = 25;
+
+function readPagedData(response) {
+  const data = response.data?.data;
+  if (Array.isArray(data)) {
+    return { items: data, page: 0, totalPages: 1, totalItems: data.length };
+  }
+  return {
+    items: data?.items || [],
+    page: data?.page || 0,
+    totalPages: data?.totalPages || 0,
+    totalItems: data?.totalItems || 0,
+  };
+}
+
 function questionTypeForSection(sectionType) {
   switch (sectionType) {
     case SECTION_TYPES.READING:
@@ -937,6 +952,8 @@ export default function QuestionBank() {
   const [filter, setFilter] = useState('ALL');
   const [preview, setPreview] = useState(null);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [pageInfo, setPageInfo] = useState({ page: 0, totalPages: 0, totalItems: 0 });
   const toast = useToast();
 
   useEffect(() => {
@@ -957,17 +974,25 @@ export default function QuestionBank() {
     setLoading(true);
     const q = filterExamId ? parseInt(filterExamId, 10) : undefined;
     questionApi
-      .getAll(Number.isFinite(q) ? q : undefined)
-      .then((r) => setQuestions(r.data?.data || []))
-      .catch(() => setQuestions([]))
+      .getAll(Number.isFinite(q) ? q : undefined, { page, size: QUESTION_PAGE_SIZE })
+      .then((r) => {
+        const next = readPagedData(r);
+        setQuestions(next.items);
+        setPageInfo({ page: next.page, totalPages: next.totalPages, totalItems: next.totalItems });
+      })
+      .catch(() => {
+        setQuestions([]);
+        setPageInfo({ page: 0, totalPages: 0, totalItems: 0 });
+      })
       .finally(() => setLoading(false));
-  }, [filterExamId]);
+  }, [filterExamId, page]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const syncExamQuery = (id) => {
+    setPage(0);
     setFilterExamId(id);
     const next = new URLSearchParams(searchParams);
     if (id) next.set('examId', id);
@@ -1044,7 +1069,10 @@ export default function QuestionBank() {
               <button
                 key={t}
                 type="button"
-                onClick={() => setFilter(t)}
+                onClick={() => {
+                  setFilter(t);
+                  setPage(0);
+                }}
                 className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
                   filter === t ? 'bg-blue-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:border-blue-300'
                 }`}
@@ -1069,6 +1097,26 @@ export default function QuestionBank() {
           <EmptyState title="No questions found" description="Add questions or adjust filters." />
         ) : (
           <div className="card overflow-hidden !p-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3 text-xs text-slate-500">
+              <span>
+                Page {pageInfo.totalPages === 0 ? 0 : pageInfo.page + 1} of {pageInfo.totalPages}
+                {pageInfo.totalItems ? ` - ${pageInfo.totalItems} total` : ''}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="sm" type="button" disabled={page <= 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+                  Previous
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  disabled={pageInfo.totalPages === 0 || page >= pageInfo.totalPages - 1}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
@@ -1083,7 +1131,7 @@ export default function QuestionBank() {
               <tbody className="divide-y divide-slate-50">
                 {filtered.map((q, idx) => (
                   <tr key={q.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 text-slate-400 text-xs">{idx + 1}</td>
+                    <td className="px-4 py-3 text-slate-400 text-xs">{page * QUESTION_PAGE_SIZE + idx + 1}</td>
                     <td className="px-4 py-3 text-xs text-slate-600 max-w-[140px]">
                       <p className="font-medium text-slate-800 truncate">{q.examTitle || '-'}</p>
                       <p className="text-slate-500 truncate">{q.sectionName || '-'}</p>

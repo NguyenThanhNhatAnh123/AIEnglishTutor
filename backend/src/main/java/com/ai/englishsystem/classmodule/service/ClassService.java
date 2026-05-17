@@ -33,9 +33,9 @@ public class ClassService {
 
     @Transactional(readOnly = true)
     public List<ClassResponse> findAll() {
-        return classRepository.findAllByOrderByIdDesc()
+        return classRepository.findSummaryRowsOrderByIdDesc()
                 .stream()
-                .map(this::toSummaryResponse)
+                .map(com.ai.englishsystem.classmodule.dto.ClassSummaryRow::toResponse)
                 .collect(Collectors.toList());
     }
 

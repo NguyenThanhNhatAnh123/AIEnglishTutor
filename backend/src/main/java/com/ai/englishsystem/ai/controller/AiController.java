@@ -8,8 +8,10 @@ import com.ai.englishsystem.ai.dto.SpeakingScoreRequest;
 import com.ai.englishsystem.ai.dto.TextToSpeechRequest;
 import com.ai.englishsystem.ai.dto.TextToSpeechResponse;
 import com.ai.englishsystem.ai.dto.WritingScoreRequest;
+import com.ai.englishsystem.ai.service.AiConcurrencyLimiter;
 import com.ai.englishsystem.ai.service.AiScoringService;
 import com.ai.englishsystem.ai.service.ImageOcrTtsService;
+import com.ai.englishsystem.common.async.BoundedAsyncExecutor;
 import com.ai.englishsystem.common.dto.ApiResponse;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.exam.dto.QuestionOptionRequest;
@@ -27,6 +29,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/ai")
@@ -36,38 +39,48 @@ public class AiController {
     private final AiScoringService aiScoringService;
     private final ImageOcrTtsService imageOcrTtsService;
     private final QuestionService questionService;
+    private final AiConcurrencyLimiter aiConcurrencyLimiter;
+    private final BoundedAsyncExecutor boundedAsyncExecutor;
 
     @PostMapping("/score-writing")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<AiScoreResponse>> scoreWriting(@Valid @RequestBody WritingScoreRequest request) {
-        AiScoreResponse response = aiScoringService.scoreWriting(request);
-        return ResponseEntity.ok(ApiResponse.success("Writing scored", response));
+    public CompletableFuture<ResponseEntity<ApiResponse<AiScoreResponse>>> scoreWriting(@Valid @RequestBody WritingScoreRequest request) {
+        return boundedAsyncExecutor.submit(() -> {
+            AiScoreResponse response = aiConcurrencyLimiter.run(() -> aiScoringService.scoreWriting(request));
+            return ResponseEntity.ok(ApiResponse.success("Writing scored", response));
+        });
     }
 
     @PostMapping("/score-speaking")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<AiScoreResponse>> scoreSpeaking(@Valid @RequestBody SpeakingScoreRequest request) {
-        AiScoreResponse response = aiScoringService.scoreSpeaking(request);
-        return ResponseEntity.ok(ApiResponse.success("Speaking scored", response));
+    public CompletableFuture<ResponseEntity<ApiResponse<AiScoreResponse>>> scoreSpeaking(@Valid @RequestBody SpeakingScoreRequest request) {
+        return boundedAsyncExecutor.submit(() -> {
+            AiScoreResponse response = aiConcurrencyLimiter.run(() -> aiScoringService.scoreSpeaking(request));
+            return ResponseEntity.ok(ApiResponse.success("Speaking scored", response));
+        });
     }
 
     @PostMapping(value = "/image-ocr-tts", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN', 'STUDENT')")
-    public ResponseEntity<ApiResponse<ImageOcrTtsResponse>> imageOcrTts(@RequestParam("file") MultipartFile file) {
-        ImageOcrTtsResponse response = imageOcrTtsService.processImage(file);
-        return ResponseEntity.ok(ApiResponse.success("Image processed with OCR + TTS", response));
+    public CompletableFuture<ResponseEntity<ApiResponse<ImageOcrTtsResponse>>> imageOcrTts(@RequestParam("file") MultipartFile file) {
+        return boundedAsyncExecutor.submit(() -> {
+            ImageOcrTtsResponse response = aiConcurrencyLimiter.run(() -> imageOcrTtsService.processImage(file));
+            return ResponseEntity.ok(ApiResponse.success("Image processed with OCR + TTS", response));
+        });
     }
 
     @PostMapping(value = "/ocr-paper", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<PaperOcrResponse>> ocrPaper(@RequestParam("file") MultipartFile file) {
-        PaperOcrResponse response = imageOcrTtsService.processPaper(file);
-        return ResponseEntity.ok(ApiResponse.success("Paper processed with OCR", response));
+    public CompletableFuture<ResponseEntity<ApiResponse<PaperOcrResponse>>> ocrPaper(@RequestParam("file") MultipartFile file) {
+        return boundedAsyncExecutor.submit(() -> {
+            PaperOcrResponse response = aiConcurrencyLimiter.run(() -> imageOcrTtsService.processPaper(file));
+            return ResponseEntity.ok(ApiResponse.success("Paper processed with OCR", response));
+        });
     }
 
     @PostMapping("/tts")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN', 'STUDENT')")
-    public ResponseEntity<ApiResponse<TextToSpeechResponse>> textToSpeech(
+    public CompletableFuture<ResponseEntity<ApiResponse<TextToSpeechResponse>>> textToSpeech(
             @RequestBody(required = false) TextToSpeechRequest request,
             @RequestParam(name = "text", required = false) String text) {
         String effective = request != null ? request.getText() : text;
@@ -75,27 +88,31 @@ public class AiController {
             // Keep consistent with other validation responses
             throw new com.ai.englishsystem.common.exception.BadRequestException("text must not be blank");
         }
-        String audioUrl = imageOcrTtsService.synthesizeTextToAudio(effective);
-        TextToSpeechResponse response = TextToSpeechResponse.builder().audioUrl(audioUrl).build();
-        return ResponseEntity.ok(ApiResponse.success("Text converted to speech", response));
+        return boundedAsyncExecutor.submit(() -> {
+            String audioUrl = aiConcurrencyLimiter.run(() -> imageOcrTtsService.synthesizeTextToAudio(effective));
+            TextToSpeechResponse response = TextToSpeechResponse.builder().audioUrl(audioUrl).build();
+            return ResponseEntity.ok(ApiResponse.success("Text converted to speech", response));
+        });
     }
 
     @PostMapping(value = "/ocr-to-question", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<OcrToQuestionResponse>> ocrToQuestion(
+    public CompletableFuture<ResponseEntity<ApiResponse<OcrToQuestionResponse>>> ocrToQuestion(
             @RequestParam("file") MultipartFile file,
             @RequestParam("sectionId") Integer sectionId,
             @RequestParam(name = "points", required = false, defaultValue = "1") Integer points,
             @RequestParam(name = "correctChoiceIndex", required = false, defaultValue = "0") Integer correctChoiceIndex,
             @RequestParam(name = "questionType", required = false, defaultValue = "MULTIPLE_CHOICE") String questionType) {
-        ImageOcrTtsResponse ocr = imageOcrTtsService.processImage(file);
-        QuestionRequest questionRequest = buildQuestionRequest(ocr, sectionId, points, correctChoiceIndex, questionType);
-        QuestionResponse created = questionService.create(questionRequest);
-        OcrToQuestionResponse response = OcrToQuestionResponse.builder()
-                .ocr(ocr)
-                .question(created)
-                .build();
-        return ResponseEntity.ok(ApiResponse.success("OCR completed and question created", response));
+        return boundedAsyncExecutor.submit(() -> {
+            ImageOcrTtsResponse ocr = aiConcurrencyLimiter.run(() -> imageOcrTtsService.processImage(file));
+            QuestionRequest questionRequest = buildQuestionRequest(ocr, sectionId, points, correctChoiceIndex, questionType);
+            QuestionResponse created = questionService.create(questionRequest);
+            OcrToQuestionResponse response = OcrToQuestionResponse.builder()
+                    .ocr(ocr)
+                    .question(created)
+                    .build();
+            return ResponseEntity.ok(ApiResponse.success("OCR completed and question created", response));
+        });
     }
 
     private QuestionRequest buildQuestionRequest(

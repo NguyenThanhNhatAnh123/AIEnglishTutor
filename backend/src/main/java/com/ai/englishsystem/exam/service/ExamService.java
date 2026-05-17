@@ -5,6 +5,7 @@ import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
 import com.ai.englishsystem.common.exception.UnauthorizedException;
 import com.ai.englishsystem.common.util.SecurityUtils;
+import com.ai.englishsystem.exam.dto.ExamAllowedClassRow;
 import com.ai.englishsystem.exam.dto.ExamRequest;
 import com.ai.englishsystem.exam.dto.ExamResponse;
 import com.ai.englishsystem.exam.dto.ExamSectionRequest;
@@ -41,11 +42,15 @@ import lombok.extern.slf4j.Slf4j;
 import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -77,22 +82,11 @@ public class ExamService {
     @Transactional(readOnly = true)
     public List<ExamResponse> findAll() {
         if (SecurityUtils.hasRole("ADMIN")) {
-            List<Exam> exams = examRepository.findAll();
-            initializeListResponseAssociations(exams);
-            return exams.stream()
-                    .sorted(byCreatedDesc())
-                    .map(this::toResponse)
-                    .collect(Collectors.toList());
+            return toListResponses(examRepository.findDashboardRowsForAdmin());
         }
         if (SecurityUtils.hasRole("TEACHER")) {
             Teacher teacher = resolveCurrentTeacher();
-            List<Exam> exams = examRepository.findActiveOrOwnedByTeacher("ACTIVE", teacher);
-            initializeListResponseAssociations(exams);
-            Integer myTeacherId = teacher.getId();
-            return exams.stream()
-                    .sorted(byCreatedDesc())
-                    .map(e -> toResponse(e, e.getTeacher().getId().equals(myTeacherId)))
-                    .collect(Collectors.toList());
+            return toListResponses(examRepository.findDashboardRowsForTeacher("ACTIVE", teacher.getId()));
         }
         List<Exam> exams = examRepository.findByStatusWithTeacher("ACTIVE");
         return exams.stream()
@@ -233,16 +227,19 @@ public class ExamService {
 
         assertOwnerOrAdmin(exam);
         List<Submission> submissions = submissionRepository.findByExam(exam);
-        for (Submission submission : submissions) {
-            List<Answer> answers = answerRepository.findBySubmission(submission);
-            if (!answers.isEmpty()) {
-                feedbackRepository.deleteByAnswerIn(answers);
-                aiResultRepository.deleteByAnswerIn(answers);
-            }
-            for (Answer answer : answers) {
-                speakingFileStorage.deleteIfExists(answer.getSpeakingAudioUrl());
-            }
+        List<Answer> answers = List.of();
+        if (!submissions.isEmpty()) {
+            List<Integer> submissionIds = submissions.stream().map(Submission::getId).toList();
+            answers = answerRepository.findBySubmissionIdInFetchQuestion(submissionIds);
         }
+        if (!answers.isEmpty()) {
+            feedbackRepository.deleteByAnswerIn(answers);
+            aiResultRepository.deleteByAnswerIn(answers);
+        }
+        deleteSpeakingFilesAfterCommit(answers.stream()
+                .map(Answer::getSpeakingAudioUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .toList());
         if (!submissions.isEmpty()) {
             // Delete FK-dependent child rows before submissions
             submissionSuspiciousEventRepository.deleteBySubmissionIn(submissions);
@@ -574,6 +571,48 @@ public class ExamService {
                 Hibernate.initialize(section.getQuestions());
             }
             Hibernate.initialize(exam.getAllowedClasses());
+        });
+    }
+
+    private List<ExamResponse> toListResponses(List<com.ai.englishsystem.exam.dto.ExamDashboardRow> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return List.of();
+        }
+
+        List<ExamResponse> responses = rows.stream()
+                .sorted(Comparator.comparing(
+                        com.ai.englishsystem.exam.dto.ExamDashboardRow::createdAt,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .map(com.ai.englishsystem.exam.dto.ExamDashboardRow::toResponse)
+                .toList();
+
+        Map<Integer, List<com.ai.englishsystem.exam.dto.ExamAllowedClassResponse>> classesByExamId =
+                new LinkedHashMap<>();
+        responses.forEach(response -> classesByExamId.put(response.getId(), new ArrayList<>()));
+
+        List<Integer> examIds = responses.stream().map(ExamResponse::getId).toList();
+        for (ExamAllowedClassRow row : examRepository.findAllowedClassRowsByExamIds(examIds)) {
+            classesByExamId.computeIfAbsent(row.examId(), ignored -> new ArrayList<>())
+                    .add(row.toResponse());
+        }
+        responses.forEach(response -> response.setAllowedClasses(classesByExamId.getOrDefault(response.getId(), List.of())));
+        return responses;
+    }
+
+    private void deleteSpeakingFilesAfterCommit(List<String> urls) {
+        if (urls == null || urls.isEmpty()) {
+            return;
+        }
+        Runnable deleteFiles = () -> urls.forEach(speakingFileStorage::deleteIfExists);
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            deleteFiles.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                deleteFiles.run();
+            }
         });
     }
 

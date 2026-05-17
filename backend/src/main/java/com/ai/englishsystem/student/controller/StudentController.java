@@ -1,12 +1,15 @@
 package com.ai.englishsystem.student.controller;
 
 import com.ai.englishsystem.common.dto.ApiResponse;
+import com.ai.englishsystem.common.dto.PageResponse;
 import com.ai.englishsystem.student.dto.StudentRequest;
 import com.ai.englishsystem.student.dto.StudentResponse;
 import com.ai.englishsystem.student.dto.StudentUpdateRequest;
 import com.ai.englishsystem.student.service.StudentService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,7 +30,13 @@ public class StudentController {
 
     @GetMapping
     @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<List<StudentResponse>>> getAll() {
+    public ResponseEntity<ApiResponse<?>> getAll(
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+        if (page != null || size != null) {
+            return ResponseEntity.ok(ApiResponse.success(PageResponse.from(
+                    studentService.findAll(pageRequest(page, size)))));
+        }
         return ResponseEntity.ok(ApiResponse.success(studentService.findAll()));
     }
 
@@ -58,5 +67,11 @@ public class StudentController {
     public ResponseEntity<ApiResponse<String>> delete(@PathVariable Integer id) {
         studentService.delete(id);
         return ResponseEntity.ok(ApiResponse.success("Student deleted", "ok"));
+    }
+
+    private PageRequest pageRequest(Integer page, Integer size) {
+        int safePage = page == null ? 0 : Math.max(0, page);
+        int safeSize = size == null ? 25 : Math.min(Math.max(1, size), 100);
+        return PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "id"));
     }
 }

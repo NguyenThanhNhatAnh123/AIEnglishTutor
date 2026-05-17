@@ -1,6 +1,7 @@
 package com.ai.englishsystem.result.controller;
 
 import com.ai.englishsystem.common.dto.ApiResponse;
+import com.ai.englishsystem.common.async.BoundedAsyncExecutor;
 import com.ai.englishsystem.result.dto.GenerateWritingReviewRequest;
 import com.ai.englishsystem.result.dto.UpdateWritingReviewRequest;
 import com.ai.englishsystem.result.dto.WritingReviewResponse;
@@ -10,21 +11,26 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.concurrent.CompletableFuture;
+
 @RestController
 @RequestMapping("/api/writing-reviews")
 @RequiredArgsConstructor
 public class WritingReviewController {
 
     private final WritingReviewService writingReviewService;
+    private final BoundedAsyncExecutor boundedAsyncExecutor;
 
     @PostMapping("/answers/{answerId}/generate-draft")
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public ResponseEntity<ApiResponse<WritingReviewResponse>> generateDraft(
+    public CompletableFuture<ResponseEntity<ApiResponse<WritingReviewResponse>>> generateDraft(
             @PathVariable Integer answerId,
             @RequestBody(required = false) GenerateWritingReviewRequest request) {
         String customPrompt = request != null ? request.getCustomPrompt() : null;
-        WritingReviewResponse response = writingReviewService.generateDraft(answerId, customPrompt);
-        return ResponseEntity.ok(ApiResponse.success("Draft AI writing review generated", response));
+        return boundedAsyncExecutor.submit(() -> {
+            WritingReviewResponse response = writingReviewService.generateDraft(answerId, customPrompt);
+            return ResponseEntity.ok(ApiResponse.success("Draft AI writing review generated", response));
+        });
     }
 
     @PutMapping("/answers/{answerId}")
