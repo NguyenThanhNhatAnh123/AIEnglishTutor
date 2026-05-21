@@ -4,7 +4,7 @@ import com.ai.englishsystem.ai.repository.AiResultRepository;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
-import com.ai.englishsystem.result.service.ScoreService;
+import com.ai.englishsystem.common.security.AccessControlService;
 import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.repository.ExamRepository;
@@ -58,8 +58,8 @@ public class SubmissionService {
     private final AiResultRepository aiResultRepository;
     private final FeedbackRepository feedbackRepository;
     private final SpeakingFileStorage speakingFileStorage;
-    private final ScoreService scoreService;
     private final SubmissionSuspiciousEventRepository submissionSuspiciousEventRepository;
+    private final AccessControlService accessControlService;
 
     @Transactional
     public SubmissionResponse start(StartSubmissionRequest request) {
@@ -104,13 +104,11 @@ public class SubmissionService {
         Exam exam = examRepository.findById(examId)
                 .orElseThrow(() -> new NotFoundException("Exam", examId));
 
-        // Ownership check: teachers can only view their own exam's submissions
-        if (SecurityUtils.hasRole("TEACHER") && !SecurityUtils.hasRole("ADMIN")) {
-            Integer currentUserId = SecurityUtils.getCurrentUserId();
-            Integer examOwnerUserId = exam.getTeacher().getUser().getId();
-            if (!currentUserId.equals(examOwnerUserId)) {
-                throw new ForbiddenException("You do not have permission to view submissions for this exam");
-            }
+        if (SecurityUtils.hasRole("TEACHER") || SecurityUtils.hasRole("ADMIN")) {
+            accessControlService.assertTeacherOrAdminOwnsExam(
+                    exam,
+                    "You do not have permission to view submissions for this exam"
+            );
         }
 
         List<Submission> submissions = submissionRepository.findByExamOrderByLatestWorkDateDesc(exam);
@@ -230,24 +228,7 @@ public class SubmissionService {
         Submission submission = submissionRepository.findWithAssociationsById(submissionId)
                 .orElseThrow(() -> new NotFoundException("Submission", submissionId));
 
-        if (SecurityUtils.hasRole("ADMIN")) {
-            // ok
-        } else if (SecurityUtils.hasRole("TEACHER")) {
-            Integer currentUserId = SecurityUtils.getCurrentUserId();
-            Integer ownerUserId = submission.getExam().getTeacher().getUser().getId();
-            if (!currentUserId.equals(ownerUserId)) {
-                throw new ForbiddenException("You do not have permission to view this submission");
-            }
-        } else if (SecurityUtils.hasRole("STUDENT")) {
-            Integer currentUserId = SecurityUtils.getCurrentUserId();
-            Student student = studentRepository.findByUser_Id(currentUserId)
-                    .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
-            if (!submission.getStudent().getId().equals(student.getId())) {
-                throw new ForbiddenException("You do not have permission to view this submission");
-            }
-        } else {
-            throw new ForbiddenException("Not allowed");
-        }
+        accessControlService.assertCurrentUserCanViewSubmission(submission);
 
         Integer dur = submission.getExam() != null ? submission.getExam().getDurationMinutes() : null;
         int effectiveDur = dur != null ? dur : 60;
@@ -320,17 +301,10 @@ public class SubmissionService {
         Submission submission = submissionRepository.findWithAssociationsById(submissionId)
                 .orElseThrow(() -> new NotFoundException("Submission", submissionId));
 
-        if (SecurityUtils.hasRole("ADMIN")) {
-            // ok
-        } else if (SecurityUtils.hasRole("TEACHER")) {
-            Integer currentUserId = SecurityUtils.getCurrentUserId();
-            Integer ownerUserId = submission.getExam().getTeacher().getUser().getId();
-            if (!currentUserId.equals(ownerUserId)) {
-                throw new ForbiddenException("You do not have permission to delete this submission");
-            }
-        } else {
-            throw new ForbiddenException("Not allowed");
-        }
+        accessControlService.assertTeacherOrAdminCanAccessSubmission(
+                submission,
+                "You do not have permission to delete this submission"
+        );
 
         List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
         if (!answers.isEmpty()) {
@@ -358,24 +332,7 @@ public class SubmissionService {
             throw new BadRequestException("Answer does not belong to this submission");
         }
         Submission submission = answer.getSubmission();
-        if (SecurityUtils.hasRole("ADMIN")) {
-            // ok
-        } else if (SecurityUtils.hasRole("TEACHER")) {
-            Integer currentUserId = SecurityUtils.getCurrentUserId();
-            Integer ownerUserId = submission.getExam().getTeacher().getUser().getId();
-            if (!currentUserId.equals(ownerUserId)) {
-                throw new ForbiddenException("You do not have permission to download this file");
-            }
-        } else if (SecurityUtils.hasRole("STUDENT")) {
-            Integer currentUserId = SecurityUtils.getCurrentUserId();
-            Student student = studentRepository.findByUser_Id(currentUserId)
-                    .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
-            if (!submission.getStudent().getId().equals(student.getId())) {
-                throw new ForbiddenException("You do not have permission to download this file");
-            }
-        } else {
-            throw new ForbiddenException("Not allowed");
-        }
+        accessControlService.assertCurrentUserCanViewSubmission(submission);
         String url = answer.getSpeakingAudioUrl();
         if (url == null || url.isBlank()) {
             throw new NotFoundException("No speaking audio for this answer");

@@ -35,6 +35,18 @@ _whisper_model = None
 _models_ready = False
 _vietocr_predictor = None
 
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+
+
+async def _read_upload_bounded(file: UploadFile) -> bytes:
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit",
+        )
+    return data
+
 
 def _get_vietocr_predictor():
     """Lazily initialize and cache VietOCR predictor (Bug #6 fix — was created per request)."""
@@ -152,7 +164,7 @@ async def transcribe(
         with tempfile.TemporaryDirectory() as td:
             audio_path = os.path.join(td, f"audio{suffix}")
             with open(audio_path, "wb") as f:
-                f.write(await file.read())
+                f.write(await _read_upload_bounded(file))
 
             segments, _info = model.transcribe(
                 audio_path,
@@ -248,7 +260,7 @@ async def ocr(
         raise HTTPException(status_code=400, detail="Missing file")
 
     try:
-        image_bytes = await file.read()
+        image_bytes = await _read_upload_bounded(file)
         images = _images_from_upload(image_bytes, file.filename, file.content_type)
 
         text_parts = []

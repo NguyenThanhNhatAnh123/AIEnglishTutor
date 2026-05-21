@@ -2,6 +2,8 @@ package com.ai.englishsystem.media.service;
 
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.util.SecurityUtils;
+import com.ai.englishsystem.media.audio.AudioMagicValidator;
+import com.ai.englishsystem.media.audio.DetectedAudioFormat;
 import com.ai.englishsystem.media.entity.MediaFile;
 import com.ai.englishsystem.media.repository.MediaFileRepository;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
@@ -46,21 +49,30 @@ public class MediaService {
             throw new BadRequestException("File exceeds 10 MB limit");
         }
 
-        String contentType = file.getContentType();
-        if (contentType == null || !ALLOWED_AUDIO_TYPES.contains(contentType.toLowerCase())) {
+        String contentType = normalizeContentType(file.getContentType());
+        if (contentType == null || !ALLOWED_AUDIO_TYPES.contains(contentType)) {
             throw new BadRequestException("Invalid audio file type: " + contentType);
         }
 
+        Path target = null;
         try {
             Path uploadPath = Paths.get(uploadDir).toAbsolutePath().normalize();
-            Files.createDirectories(uploadPath);
+            Path listeningDir = uploadPath.resolve("audio").resolve("listening").normalize();
+            if (!listeningDir.startsWith(uploadPath)) {
+                throw new BadRequestException("Invalid upload directory");
+            }
+            Files.createDirectories(listeningDir);
 
-            String ext = getExtension(file.getOriginalFilename(), contentType);
+            String ext = getExtension(contentType);
             String filename = UUID.randomUUID() + ext;
-            Path target = uploadPath.resolve(filename);
+            target = listeningDir.resolve(filename).normalize();
+            if (!target.startsWith(listeningDir)) {
+                throw new BadRequestException("Invalid filename");
+            }
             file.transferTo(target.toFile());
+            validateAudioMagic(target, contentType);
 
-            String url = "/api/media/files/" + filename;
+            String url = "/uploads/audio/listening/" + filename;
 
             Integer userId = SecurityUtils.getCurrentUserIdOrNull();
             MediaFile mediaFile = MediaFile.builder()
@@ -72,7 +84,11 @@ public class MediaService {
 
             log.info("Uploaded audio file: {} -> {}", file.getOriginalFilename(), url);
             return url;
+        } catch (BadRequestException e) {
+            deletePartialFile(target);
+            throw e;
         } catch (IOException e) {
+            deletePartialFile(target);
             log.error("Failed to upload file", e);
             throw new BadRequestException("Failed to save file: " + e.getMessage());
         }
@@ -94,11 +110,36 @@ public class MediaService {
         return filePath;
     }
 
-    private String getExtension(String originalName, String contentType) {
-        if (originalName != null && originalName.contains(".")) {
-            return originalName.substring(originalName.lastIndexOf('.'));
+    private void validateAudioMagic(Path target, String contentType) throws IOException {
+        AudioMagicValidator.assertRecognized(target);
+        byte[] head = AudioMagicValidator.readHead(target, 32);
+        DetectedAudioFormat detected = AudioMagicValidator.detectFormat(head);
+        DetectedAudioFormat expected = switch (contentType) {
+            case "audio/webm" -> DetectedAudioFormat.WEBM;
+            case "audio/ogg" -> DetectedAudioFormat.OGG;
+            case "audio/mpeg", "audio/mp3" -> DetectedAudioFormat.MP3;
+            case "audio/wav" -> DetectedAudioFormat.WAV;
+            case "audio/mp4", "audio/x-m4a" -> DetectedAudioFormat.MP4;
+            default -> DetectedAudioFormat.UNKNOWN;
+        };
+        if (expected != DetectedAudioFormat.UNKNOWN && expected != detected) {
+            throw new BadRequestException("Audio content does not match declared type");
         }
-        return switch (contentType.toLowerCase()) {
+    }
+
+    private void deletePartialFile(Path target) {
+        if (target == null) {
+            return;
+        }
+        try {
+            Files.deleteIfExists(target);
+        } catch (IOException ex) {
+            log.warn("Could not delete rejected media file {}: {}", target, ex.getMessage());
+        }
+    }
+
+    private String getExtension(String contentType) {
+        return switch (contentType) {
             case "audio/webm" -> ".webm";
             case "audio/ogg" -> ".ogg";
             case "audio/mpeg", "audio/mp3" -> ".mp3";
@@ -106,5 +147,12 @@ public class MediaService {
             case "audio/mp4", "audio/x-m4a" -> ".m4a";
             default -> ".bin";
         };
+    }
+
+    private String normalizeContentType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return null;
+        }
+        return contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
     }
 }

@@ -20,6 +20,81 @@ function formatScore(v) {
   return String(Math.round(v * 10) / 10);
 }
 
+function numericScore(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function scoreBand(v) {
+  const n = numericScore(v);
+  if (n == null) return { label: 'Pending', tone: 'slate' };
+  if (n >= 75) return { label: 'Strong', tone: 'emerald' };
+  if (n >= 50) return { label: 'Practice', tone: 'amber' };
+  return { label: 'Needs work', tone: 'rose' };
+}
+
+function toneClasses(tone) {
+  return {
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    amber: 'border-amber-200 bg-amber-50 text-amber-800',
+    rose: 'border-rose-200 bg-rose-50 text-rose-800',
+    blue: 'border-blue-200 bg-blue-50 text-blue-800',
+    slate: 'border-slate-200 bg-slate-50 text-slate-700',
+  }[tone] || 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
+function buildPracticePlan(score, answers) {
+  if (!score) {
+    return {
+      title: 'Feedback is still loading',
+      detail: 'Open this result again after the score and review data are available.',
+      items: [
+        ['Review status', 'Waiting for score data', 'slate'],
+        ['Next step', 'Check submissions later', 'blue'],
+      ],
+    };
+  }
+
+  const total = numericScore(score.totalScore);
+  const writing = numericScore(score.writingScore);
+  const speaking = numericScore(score.speakingScore);
+  const hasWritingAnswers = answers.some((a) => String(a.questionType || '').toUpperCase() === 'WRITING');
+  const hasSpeakingAnswers = answers.some((a) => String(a.questionType || '').toUpperCase() === 'SPEAKING');
+  const writingPending = hasWritingAnswers && score.writingReviewStatus && score.writingReviewStatus !== 'NOT_REQUIRED' && !score.writingReviewPublished;
+  const speakingPending = hasSpeakingAnswers && score.speakingReviewStatus && score.speakingReviewStatus !== 'NOT_REQUIRED' && !score.speakingReviewPublished;
+
+  if (writingPending || speakingPending || total == null) {
+    return {
+      title: 'Wait for teacher-published feedback',
+      detail: 'Your subjective score may change after writing or speaking review is published.',
+      items: [
+        ['Writing', writingPending ? 'Awaiting review' : formatScore(writing), writingPending ? 'amber' : scoreBand(writing).tone],
+        ['Speaking', speakingPending ? 'Awaiting review' : formatScore(speaking), speakingPending ? 'amber' : scoreBand(speaking).tone],
+      ],
+    };
+  }
+
+  const weakest = [
+    ['Writing', writing],
+    ['Speaking', speaking],
+    ['MC / auto', numericScore(score.mcScore)],
+  ]
+    .filter(([, value]) => value != null)
+    .sort((a, b) => a[1] - b[1])[0];
+
+  return {
+    title: total >= 75 ? 'Keep momentum with targeted practice' : 'Focus the next session on your weakest skill',
+    detail: weakest
+      ? `${weakest[0]} is the best place to practice next based on the published score breakdown.`
+      : 'Review teacher comments and repeat a short practice round before the next exam.',
+    items: [
+      ['Overall', formatScore(total), scoreBand(total).tone],
+      weakest ? ['Focus next', weakest[0], scoreBand(weakest[1]).tone] : ['Focus next', 'Review feedback', 'blue'],
+    ],
+  };
+}
+
 function ReviewCard({ title, score, published, message, children }) {
   return (
     <div className={`rounded-2xl border p-5 shadow-sm ${
@@ -41,6 +116,82 @@ function ReviewCard({ title, score, published, message, children }) {
         {published ? children : (message || AWAITING_REVIEW)}
       </div>
     </div>
+  );
+}
+
+function PracticePlan({ plan }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Next practice plan</p>
+          <h2 className="mt-2 text-xl font-extrabold text-slate-900">{plan.title}</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-500">{plan.detail}</p>
+        </div>
+        <Link
+          to="/exams"
+          className="inline-flex shrink-0 items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
+        >
+          Find practice
+        </Link>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {plan.items.map(([label, value, tone]) => (
+          <div key={label} className={`rounded-xl border p-4 ${toneClasses(tone)}`}>
+            <p className="text-[11px] font-bold uppercase tracking-wide opacity-75">{label}</p>
+            <p className="mt-1 text-lg font-extrabold">{value}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SkillBreakdown({ score, answers }) {
+  const hasWriting = answers.some((a) => String(a.questionType || '').toUpperCase() === 'WRITING');
+  const hasSpeaking = answers.some((a) => String(a.questionType || '').toUpperCase() === 'SPEAKING');
+  const cards = [
+    {
+      label: 'Auto-graded',
+      value: formatScore(score?.mcScore),
+      detail: 'Multiple choice and listening answers.',
+      tone: scoreBand(score?.mcScore).tone,
+    },
+    {
+      label: 'Writing',
+      value: hasWriting ? formatScore(score?.writingScore) : 'Not used',
+      detail: hasWriting
+        ? (score?.writingReviewPublished ? 'Teacher feedback is published.' : 'Waiting for teacher review or score data.')
+        : 'This submission has no writing answer.',
+      tone: hasWriting ? scoreBand(score?.writingScore).tone : 'slate',
+    },
+    {
+      label: 'Speaking',
+      value: hasSpeaking ? formatScore(score?.speakingScore) : 'Not used',
+      detail: hasSpeaking
+        ? (score?.speakingReviewPublished ? 'Review recording feedback before the next prompt.' : 'Waiting for teacher review or score data.')
+        : 'This submission has no speaking answer.',
+      tone: hasSpeaking ? scoreBand(score?.speakingScore).tone : 'slate',
+    },
+  ];
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Skill breakdown</p>
+        <h2 className="mt-2 text-lg font-extrabold text-slate-900">What this result says</h2>
+        <p className="mt-1 text-sm text-slate-500">Use these signals to decide the next short practice session.</p>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {cards.map((card) => (
+          <div key={card.label} className={`rounded-xl border p-4 ${toneClasses(card.tone)}`}>
+            <p className="text-[11px] font-bold uppercase tracking-wide opacity-75">{card.label}</p>
+            <p className="mt-2 text-2xl font-extrabold">{card.value}</p>
+            <p className="mt-1 text-xs leading-relaxed opacity-80">{card.detail}</p>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -100,6 +251,9 @@ export default function ExamResult() {
   const examTitle = submission?.examTitle || 'Exam result';
   const totalVisible = score?.totalScore;
   const totalLabel = totalVisible != null ? formatScore(totalVisible) : 'N/A';
+  const practicePlan = buildPracticePlan(score, sortedAnswers);
+  const isOfficialExam = submission?.examType === 'OFFICIAL';
+  const integrityCount = Number(score?.suspiciousEventCount || 0);
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 pb-10">
@@ -152,20 +306,32 @@ export default function ExamResult() {
         </div>
       </div>
 
+      <PracticePlan plan={practicePlan} />
+
       {score && (
         <>
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <SkillBreakdown score={score} answers={sortedAnswers} />
+
+          <section className={`rounded-xl border p-5 shadow-sm ${
+            isOfficialExam ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50/80'
+          }`}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-extrabold text-slate-900">Session integrity</h2>
-                <p className="text-sm text-slate-500">Activity markers recorded during the exam session.</p>
+                <h2 className="text-lg font-extrabold text-slate-900">
+                  {isOfficialExam ? 'Session integrity' : 'Session notes'}
+                </h2>
+                <p className="text-sm text-slate-500">
+                  {isOfficialExam
+                    ? 'Activity markers recorded during the official exam session.'
+                    : 'Light activity markers from this practice attempt.'}
+                </p>
               </div>
               <span className={`rounded-full px-3 py-1 text-xs font-bold ${
-                Number(score.suspiciousEventCount || 0) > 0
+                integrityCount > 0
                   ? 'bg-amber-100 text-amber-800'
                   : 'bg-emerald-100 text-emerald-800'
               }`}>
-                {Number(score.suspiciousEventCount || 0) > 0 ? 'Needs review' : 'Clean session'}
+                {integrityCount > 0 ? 'Needs review' : 'Clean session'}
               </span>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -201,7 +367,7 @@ export default function ExamResult() {
               published={score.speakingReviewPublished}
               message={score.speakingReviewMessage}
             >
-              Teacher has published your speaking score.
+              {score.speakingReviewMessage || 'Teacher has published your speaking score.'}
             </ReviewCard>
           )}
         </>

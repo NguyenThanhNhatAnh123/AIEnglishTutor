@@ -46,7 +46,6 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         .requestMatchers("/actuator/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.GET, "/api/media/files/**").permitAll()
                         .requestMatchers("/uploads/audio/listening/**", "/uploads/audio/tts/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/media/upload").hasAnyRole("TEACHER", "ADMIN")
                         // FIX: allow preflight OPTIONS for all endpoints (CORS)

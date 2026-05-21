@@ -60,6 +60,12 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!-- Cache abstraction -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-cache</artifactId>
+        </dependency>
+
         <!-- Redis (shared cache / distributed rate limiting) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

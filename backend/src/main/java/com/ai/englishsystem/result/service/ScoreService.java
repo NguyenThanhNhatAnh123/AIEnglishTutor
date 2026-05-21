@@ -2,8 +2,8 @@ package com.ai.englishsystem.result.service;
 
 import com.ai.englishsystem.ai.entity.AiResult;
 import com.ai.englishsystem.ai.repository.AiResultRepository;
-import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
+import com.ai.englishsystem.common.security.AccessControlService;
 import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.result.dto.ScoreResponse;
 import com.ai.englishsystem.result.entity.Feedback;
@@ -11,8 +11,6 @@ import com.ai.englishsystem.result.entity.Score;
 import com.ai.englishsystem.result.entity.WritingReviewStatus;
 import com.ai.englishsystem.result.repository.FeedbackRepository;
 import com.ai.englishsystem.result.repository.ScoreRepository;
-import com.ai.englishsystem.student.entity.Student;
-import com.ai.englishsystem.student.repository.StudentRepository;
 import com.ai.englishsystem.submission.entity.Answer;
 import com.ai.englishsystem.submission.entity.Submission;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
@@ -32,34 +30,23 @@ public class ScoreService {
 
     private final ScoreRepository scoreRepository;
     private final SubmissionRepository submissionRepository;
-    private final StudentRepository studentRepository;
     private final AnswerRepository answerRepository;
     private final AiResultRepository aiResultRepository;
     private final FeedbackRepository feedbackRepository;
+    private final AccessControlService accessControlService;
 
     @Transactional(readOnly = true)
     public ScoreResponse getBySubmissionId(Integer submissionId) {
         Submission submission = submissionRepository.findWithAssociationsById(submissionId)
                 .orElseThrow(() -> new NotFoundException("Submission", submissionId));
 
-        boolean studentViewer = false;
-        if (SecurityUtils.hasRole("ADMIN")) {
-            // admins can view any score
-        } else if (SecurityUtils.hasRole("TEACHER")) {
-            Integer currentUserId = SecurityUtils.getCurrentUserId();
-            Integer ownerUserId = submission.getExam().getTeacher().getUser().getId();
-            if (!currentUserId.equals(ownerUserId)) {
-                throw new ForbiddenException("Cannot view scores for another teacher's exam");
-            }
-        } else {
-            studentViewer = true;
-            Integer userId = SecurityUtils.getCurrentUserId();
-            Student student = studentRepository.findByUser_Id(userId)
-                    .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
-            if (!submission.getStudent().getId().equals(student.getId())) {
-                throw new ForbiddenException("Cannot view another student's score");
-            }
-        }
+        accessControlService.assertCurrentUserCanViewSubmission(
+                submission,
+                "Cannot view scores for another teacher's exam",
+                "Cannot view another student's score",
+                "Cannot view this score"
+        );
+        boolean studentViewer = SecurityUtils.hasRole("STUDENT");
 
         Score score = scoreRepository.findFirstBySubmissionOrderByIdAsc(submission)
                 .orElseThrow(() -> new NotFoundException("Score not found for submission"));
@@ -278,4 +265,3 @@ public class ScoreService {
     private record ReviewSummary(int totalAnswers, boolean allPublished, Float publishedAverageScore) {
     }
 }
-

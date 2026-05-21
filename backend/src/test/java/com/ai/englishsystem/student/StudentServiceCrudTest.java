@@ -2,11 +2,17 @@ package com.ai.englishsystem.student;
 
 import com.ai.englishsystem.auth.entity.Role;
 import com.ai.englishsystem.auth.repository.RoleRepository;
+import com.ai.englishsystem.classmodule.entity.ClassEntity;
+import com.ai.englishsystem.classmodule.entity.ClassStudent;
+import com.ai.englishsystem.classmodule.repository.ClassRepository;
+import com.ai.englishsystem.classmodule.repository.ClassStudentRepository;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.student.dto.StudentUpdateRequest;
 import com.ai.englishsystem.student.entity.Student;
 import com.ai.englishsystem.student.repository.StudentRepository;
 import com.ai.englishsystem.student.service.StudentService;
+import com.ai.englishsystem.teacher.entity.Teacher;
+import com.ai.englishsystem.teacher.repository.TeacherRepository;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -36,6 +42,12 @@ class StudentServiceCrudTest {
     private UserRepository userRepository;
     @Autowired
     private StudentRepository studentRepository;
+    @Autowired
+    private TeacherRepository teacherRepository;
+    @Autowired
+    private ClassRepository classRepository;
+    @Autowired
+    private ClassStudentRepository classStudentRepository;
 
     @AfterEach
     void clearSecurity() {
@@ -55,6 +67,10 @@ class StudentServiceCrudTest {
                 .fullName("Teacher CRUD")
                 .role(teacherRole)
                 .status("ACTIVE")
+                .build());
+        Teacher teacherProfile = teacherRepository.save(Teacher.builder()
+                .user(teacherUser)
+                .teacherCode("CRUD-T-" + suffix)
                 .build());
 
         User u1 = userRepository.save(User.builder()
@@ -76,6 +92,12 @@ class StudentServiceCrudTest {
 
         Student s1 = studentRepository.save(Student.builder().user(u1).studentCode("C1-" + suffix).build());
         studentRepository.save(Student.builder().user(u2).studentCode("C2-" + suffix).build());
+
+        ClassEntity classEntity = classRepository.save(ClassEntity.builder()
+                .name("CRUD Class " + suffix)
+                .teacher(teacherProfile)
+                .build());
+        classStudentRepository.save(ClassStudent.builder().classEntity(classEntity).student(s1).build());
 
         authenticateAs(teacherUser.getId(), "ROLE_TEACHER");
 

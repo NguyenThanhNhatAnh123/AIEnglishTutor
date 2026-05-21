@@ -31,6 +31,26 @@ public interface ClassRepository extends JpaRepository<ClassEntity, Integer> {
             """)
     List<ClassSummaryRow> findSummaryRowsOrderByIdDesc();
 
+    @Query("""
+            SELECT new com.ai.englishsystem.classmodule.dto.ClassSummaryRow(
+                c.id,
+                c.name,
+                teacher.id,
+                teacherUser.fullName,
+                c.description,
+                c.createdAt,
+                COUNT(cs.id)
+            )
+            FROM ClassEntity c
+            JOIN c.teacher teacher
+            JOIN teacher.user teacherUser
+            LEFT JOIN ClassStudent cs ON cs.classEntity = c
+            WHERE teacherUser.id = :userId
+            GROUP BY c.id, c.name, teacher.id, teacherUser.fullName, c.description, c.createdAt
+            ORDER BY c.id DESC
+            """)
+    List<ClassSummaryRow> findSummaryRowsByTeacherUserIdOrderByIdDesc(@Param("userId") Integer userId);
+
     List<ClassEntity> findByNameContainingIgnoreCaseOrderByIdDesc(String name);
 
     @Query("SELECT COUNT(cs) FROM ClassStudent cs WHERE cs.classEntity.id = :classId")

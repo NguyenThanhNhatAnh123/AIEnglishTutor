@@ -18,10 +18,13 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * Rate limiter per authenticated user (or per IP for unauthenticated requests).
@@ -49,6 +52,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     @Value("${app.rate-limit.backend:memory}")
     private String rateLimitBackend;
+
+    @Value("${app.rate-limit.bypass-roles:TEACHER}")
+    private String bypassRoles;
 
     private final StringRedisTemplate redisTemplate;
     private final AtomicBoolean redisFallbackLogged = new AtomicBoolean(false);
@@ -84,6 +90,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 || path.startsWith("/actuator/")
                 || path.startsWith("/uploads/")
                 || path.startsWith("/api/media/files/")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (hasBypassRole(auth)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -165,6 +177,23 @@ public class RateLimitFilter extends OncePerRequestFilter {
             }
             return current > maxRequests;
         }
+    }
+
+    private boolean hasBypassRole(Authentication auth) {
+        if (auth == null || auth.getAuthorities() == null || bypassRoles == null || bypassRoles.isBlank()) {
+            return false;
+        }
+        Set<String> normalizedBypassRoles = Arrays.stream(bypassRoles.split(","))
+                .map(String::trim)
+                .filter(role -> !role.isBlank())
+                .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
+                .map(String::toUpperCase)
+                .collect(Collectors.toSet());
+        if (normalizedBypassRoles.isEmpty()) {
+            return false;
+        }
+        return auth.getAuthorities().stream()
+                .anyMatch(authority -> normalizedBypassRoles.contains(authority.getAuthority().toUpperCase()));
     }
 
     private void cleanupStaleEntries(long now, long windowMs) {

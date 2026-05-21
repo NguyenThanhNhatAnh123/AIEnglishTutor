@@ -19,7 +19,24 @@ class FlywayRuntimePathGuardTest {
         String content = Files.readString(applicationProperties, StandardCharsets.UTF_8);
 
         assertThat(content).contains("spring.flyway.locations=classpath:db/migration");
+        assertThat(content).contains("spring.flyway.enabled=${APP_FLYWAY_ENABLED:true}");
+        assertThat(content).contains("spring.flyway.repair=${APP_FLYWAY_REPAIR:false}");
         assertThat(content).contains("spring.jpa.hibernate.ddl-auto=${APP_JPA_DDL_AUTO:validate}");
+    }
+
+    @Test
+    void documentedRuntimeEnvironmentVariablesAreWiredIntoSpringConfig() throws IOException {
+        String app = Files.readString(Path.of("src", "main", "resources", "application.properties"), StandardCharsets.UTF_8);
+        String prod = Files.readString(Path.of("src", "main", "resources", "application-prod.properties"), StandardCharsets.UTF_8);
+
+        assertThat(app).contains("server.port=${APP_SERVER_PORT:8080}");
+        assertThat(app).contains("app.ai.async.core-pool-size=${APP_AI_ASYNC_CORE:5}");
+        assertThat(app).contains("app.ai.async.max-pool-size=${APP_AI_ASYNC_MAX:20}");
+        assertThat(app).contains("app.ai.async.queue-capacity=${APP_AI_ASYNC_QUEUE:100}");
+
+        assertThat(prod).contains("server.port=${APP_SERVER_PORT:8080}");
+        assertThat(prod).contains("spring.flyway.enabled=${APP_FLYWAY_ENABLED:true}");
+        assertThat(prod).contains("spring.flyway.repair=${APP_FLYWAY_REPAIR:false}");
     }
 
     @Test

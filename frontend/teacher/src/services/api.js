@@ -128,7 +128,6 @@ export const mediaApi = {
 
 export const scoreApi = {
   getBySubmissionId: (id) => api.get(`/scores/${id}`),
-  update: (id, data) => api.put(`/scores/${id}`, data),
 };
 
 export const aiApi = {

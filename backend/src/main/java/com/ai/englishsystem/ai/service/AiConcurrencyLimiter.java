@@ -1,6 +1,6 @@
 package com.ai.englishsystem.ai.service;
 
-import com.ai.englishsystem.common.exception.BadRequestException;
+import com.ai.englishsystem.common.exception.ServiceUnavailableException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -18,7 +18,7 @@ public class AiConcurrencyLimiter {
 
     public <T> T run(Supplier<T> work) {
         if (!semaphore.tryAcquire()) {
-            throw new BadRequestException("AI service is busy. Please retry in a moment.");
+            throw new ServiceUnavailableException("AI service is busy. Please retry in a moment.");
         }
         try {
             return work.get();

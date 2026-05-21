@@ -14,6 +14,11 @@ spring:
   flyway:
     enabled: false
 
+management:
+  health:
+    redis:
+      enabled: false
+
 app:
   jwt:
     secret: testSecretKeyForTestingPurposesOnlyMustBeLongEnough256Bits!!

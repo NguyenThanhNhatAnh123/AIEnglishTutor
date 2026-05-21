@@ -2,6 +2,7 @@ package com.ai.englishsystem.teacher.service;
 
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.NotFoundException;
+import com.ai.englishsystem.config.CacheNames;
 import com.ai.englishsystem.teacher.dto.TeacherRequest;
 import com.ai.englishsystem.teacher.dto.TeacherResponse;
 import com.ai.englishsystem.teacher.entity.Teacher;
@@ -9,6 +10,8 @@ import com.ai.englishsystem.teacher.repository.TeacherRepository;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,6 +29,7 @@ public class TeacherService {
     private final UserRepository userRepository;
 
     @Transactional(readOnly = true)
+    @Cacheable(CacheNames.TEACHERS)
     public List<TeacherResponse> findAll() {
         return teacherRepository.findAll().stream()
                 .map(this::toResponse)
@@ -39,6 +43,7 @@ public class TeacherService {
     }
 
     @Transactional
+    @CacheEvict(value = CacheNames.TEACHERS, allEntries = true)
     public TeacherResponse create(TeacherRequest request) {
         User user = userRepository.findById(request.getUserId())
                 .orElseThrow(() -> new NotFoundException("User", request.getUserId()));

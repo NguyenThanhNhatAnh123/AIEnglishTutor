@@ -6,6 +6,41 @@ import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import { useToast } from '../context/ToastContext';
 
+const practiceModes = [
+  {
+    title: 'Timed exam',
+    detail: 'Best for official readiness and pacing.',
+    tone: 'bg-blue-50 text-blue-700 border-blue-100',
+  },
+  {
+    title: 'Speaking drill',
+    detail: 'Use short prompts to build fluency.',
+    tone: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+  },
+  {
+    title: 'Writing review',
+    detail: 'Rewrite with teacher feedback in mind.',
+    tone: 'bg-amber-50 text-amber-700 border-amber-100',
+  },
+];
+
+function inferSkills(exam) {
+  const text = `${exam.title || ''} ${exam.description || ''}`.toLowerCase();
+  const fromSections = (exam.sections || [])
+    .map((s) => s.sectionType || s.name)
+    .filter(Boolean);
+  const skills = new Set(fromSections.map((s) => String(s).replace(/_/g, ' ').toLowerCase()));
+  [
+    ['reading', 'Reading'],
+    ['listening', 'Listening'],
+    ['writing', 'Writing'],
+    ['speaking', 'Speaking'],
+  ].forEach(([needle, label]) => {
+    if (text.includes(needle) || [...skills].some((s) => s.includes(needle))) skills.add(label);
+  });
+  return [...skills].map((s) => String(s).trim()).filter(Boolean).slice(0, 4);
+}
+
 export default function ExamList() {
   const [exams, setExams] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -74,13 +109,13 @@ export default function ExamList() {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+      <div className="rounded-xl border border-blue-100 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-500">Exam center</p>
-            <h1 className="mt-1 text-2xl font-bold text-slate-900">Available exams</h1>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-500">Practice + exam center</p>
+            <h1 className="mt-1 text-2xl font-bold text-slate-900">Choose your next activity</h1>
             <p className="mt-1 text-sm text-slate-500">
-              Choose an active paper, check your attempt limit, then start when you are ready.
+              Start an assigned paper, resume an open attempt, or pick a practice focus before the next test.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[460px]">
@@ -96,6 +131,15 @@ export default function ExamList() {
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          {practiceModes.map((mode) => (
+            <div key={mode.title} className={`rounded-xl border px-4 py-3 ${mode.tone}`}>
+              <p className="text-sm font-extrabold">{mode.title}</p>
+              <p className="mt-1 text-xs leading-relaxed opacity-80">{mode.detail}</p>
+            </div>
+          ))}
         </div>
 
         <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]">
@@ -148,10 +192,11 @@ export default function ExamList() {
         />
       ) : (
         <>
-          <p className="text-sm text-slate-500">{filtered.length} exam{filtered.length !== 1 ? 's' : ''} found</p>
+          <p className="text-sm text-slate-500">{filtered.length} {filtered.length === 1 ? 'activity' : 'activities'} found</p>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filtered.map((exam) => {
               const exhausted = exam.remainingAttempts === 0 && !exam.hasInProgressSubmission;
+              const skills = inferSkills(exam);
               const card = (
                 <>
                   <div className="flex items-start justify-between mb-3">
@@ -169,6 +214,15 @@ export default function ExamList() {
                   {exam.description && (
                     <p className="text-sm text-slate-500 line-clamp-2 flex-1">{exam.description}</p>
                   )}
+                  {skills.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {skills.map((skill) => (
+                        <span key={skill} className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                          {skill}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
                     <div className="rounded-lg bg-slate-50 px-2 py-2">
                       <p className="text-slate-400">Time</p>
@@ -183,12 +237,14 @@ export default function ExamList() {
                       <p className="font-semibold text-slate-700">{exam.sectionCount ?? '-'}</p>
                     </div>
                   </div>
-                  <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
+                  <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-3">
                     <span className={`text-xs font-semibold ${exhausted ? 'text-red-600' : 'text-blue-700'}`}>
                       {attemptSummary(exam)}
                     </span>
-                    <span className={`text-xs font-semibold ${exhausted ? 'text-slate-400' : 'text-blue-600 group-hover:underline'}`}>
-                      {exhausted ? 'Limit reached' : exam.hasInProgressSubmission ? 'Resume exam ->' : 'Start exam ->'}
+                    <span className={`shrink-0 rounded-lg px-3 py-2 text-xs font-bold ${
+                      exhausted ? 'bg-slate-100 text-slate-400' : 'bg-blue-600 text-white group-hover:bg-blue-700'
+                    }`}>
+                      {exhausted ? 'Limit reached' : exam.hasInProgressSubmission ? 'Resume' : 'Start'}
                     </span>
                   </div>
                 </>
@@ -197,7 +253,7 @@ export default function ExamList() {
               return exhausted ? (
                 <div
                   key={exam.id}
-                  className="card border border-slate-100 bg-slate-50/80 opacity-80 flex flex-col"
+                  className="card flex flex-col border border-slate-100 bg-slate-50/80 opacity-80"
                   aria-disabled="true"
                 >
                   {card}
@@ -206,7 +262,7 @@ export default function ExamList() {
                 <Link
                   key={exam.id}
                   to={`/exam/${exam.id}`}
-                  className="card hover:shadow-md hover:border-blue-200 border border-slate-100 transition-all group flex flex-col"
+                  className="card group flex flex-col border border-slate-100 transition-all hover:border-blue-200 hover:shadow-md"
                 >
                   {card}
                 </Link>

@@ -69,15 +69,6 @@ export const scoreApi = {
   getBySubmissionId: (id) => api.get(`/scores/${id}`),
 };
 
-/** Media upload (audio recording) */
-export const mediaApi = {
-  upload: (file) => {
-    const formData = new FormData();
-    formData.append('file', file, 'recording.webm');
-    return api.post('/media/upload', formData);
-  },
-};
-
 /** Speaking answers → uploads/audio/speaking/ (student only) */
 export const speakingApi = {
   upload: (blob, submissionId, questionId) => {

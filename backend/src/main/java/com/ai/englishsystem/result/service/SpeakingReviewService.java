@@ -5,27 +5,22 @@ import com.ai.englishsystem.ai.dto.SpeakingScoreRequest;
 import com.ai.englishsystem.ai.service.AiConcurrencyLimiter;
 import com.ai.englishsystem.ai.service.AiScoringService;
 import com.ai.englishsystem.common.exception.BadRequestException;
-import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
+import com.ai.englishsystem.common.security.AccessControlService;
 import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.result.dto.SpeakingReviewResponse;
 import com.ai.englishsystem.result.dto.UpdateSpeakingReviewRequest;
 import com.ai.englishsystem.result.entity.Feedback;
-import com.ai.englishsystem.result.entity.Score;
 import com.ai.englishsystem.result.entity.WritingReviewStatus;
 import com.ai.englishsystem.result.repository.FeedbackRepository;
-import com.ai.englishsystem.result.repository.ScoreRepository;
 import com.ai.englishsystem.speaking.service.SpeakingFileStorage;
 import com.ai.englishsystem.submission.entity.Answer;
-import com.ai.englishsystem.submission.entity.Submission;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -33,14 +28,18 @@ public class SpeakingReviewService {
 
     private final AnswerRepository answerRepository;
     private final FeedbackRepository feedbackRepository;
-    private final ScoreRepository scoreRepository;
     private final AiScoringService aiScoringService;
     private final SpeakingFileStorage speakingFileStorage;
     private final AiConcurrencyLimiter aiConcurrencyLimiter;
+    private final AccessControlService accessControlService;
+    private final ReviewScoreAggregator reviewScoreAggregator;
 
     public SpeakingReviewResponse generateDraft(Integer answerId, String customPrompt, String language) {
         Answer answer = loadSpeakingAnswer(answerId);
-        assertTeacherOwnership(answer);
+        accessControlService.assertTeacherOrAdminCanManageAnswer(
+                answer,
+                "Cannot manage speaking reviews for another teacher's exam"
+        );
 
         String transcript = aiConcurrencyLimiter.run(() -> aiScoringService.transcribeSpeakingAudio(
                 speakingFileStorage.resolveFromPublicUrl(answer.getSpeakingAudioUrl()),
@@ -80,7 +79,10 @@ public class SpeakingReviewService {
     @Transactional
     public SpeakingReviewResponse updateDraft(Integer answerId, UpdateSpeakingReviewRequest request) {
         Answer answer = loadSpeakingAnswer(answerId);
-        assertTeacherOwnership(answer);
+        accessControlService.assertTeacherOrAdminCanManageAnswer(
+                answer,
+                "Cannot manage speaking reviews for another teacher's exam"
+        );
 
         if (request == null || (request.getScore() == null && !hasText(request.getFeedback()) && !hasText(request.getTranscript()))) {
             throw new BadRequestException("Provide score, feedback, or transcript to update draft review");
@@ -105,7 +107,10 @@ public class SpeakingReviewService {
     @Transactional
     public SpeakingReviewResponse approveAndPublish(Integer answerId) {
         Answer answer = loadSpeakingAnswer(answerId);
-        assertTeacherOwnership(answer);
+        accessControlService.assertTeacherOrAdminCanManageAnswer(
+                answer,
+                "Cannot manage speaking reviews for another teacher's exam"
+        );
 
         Feedback feedback = feedbackRepository.findByAnswer(answer)
                 .orElseThrow(() -> new BadRequestException("No draft speaking review found"));
@@ -124,14 +129,17 @@ public class SpeakingReviewService {
         feedback.setPublishedAt(LocalDateTime.now());
         feedback = feedbackRepository.save(feedback);
 
-        refreshSubmissionScore(answer.getSubmission(), currentUserId);
+        reviewScoreAggregator.refreshSubjectiveScore(answer.getSubmission(), "SPEAKING", currentUserId);
         return toResponse(feedback);
     }
 
     @Transactional
     public SpeakingReviewResponse revertToDraft(Integer answerId) {
         Answer answer = loadSpeakingAnswer(answerId);
-        assertTeacherOwnership(answer);
+        accessControlService.assertTeacherOrAdminCanManageAnswer(
+                answer,
+                "Cannot manage speaking reviews for another teacher's exam"
+        );
 
         Feedback feedback = feedbackRepository.findByAnswer(answer)
                 .orElseThrow(() -> new BadRequestException("No speaking review found"));
@@ -143,7 +151,7 @@ public class SpeakingReviewService {
         feedback.setPublishedAt(null);
         feedback = feedbackRepository.save(feedback);
 
-        refreshSubmissionScore(answer.getSubmission(), SecurityUtils.getCurrentUserId());
+        reviewScoreAggregator.refreshSubjectiveScore(answer.getSubmission(), "SPEAKING", SecurityUtils.getCurrentUserId());
         return toResponse(feedback);
     }
 
@@ -160,58 +168,6 @@ public class SpeakingReviewService {
         return answer;
     }
 
-    private void assertTeacherOwnership(Answer answer) {
-        if (SecurityUtils.hasRole("ADMIN")) {
-            return;
-        }
-        if (SecurityUtils.hasRole("TEACHER")) {
-            Integer currentUserId = SecurityUtils.getCurrentUserId();
-            Integer ownerUserId = answer.getSubmission().getExam().getTeacher().getUser().getId();
-            if (!currentUserId.equals(ownerUserId)) {
-                throw new ForbiddenException("Cannot manage speaking reviews for another teacher's exam");
-            }
-            return;
-        }
-        throw new ForbiddenException("Not allowed to manage speaking reviews");
-    }
-
-    private void refreshSubmissionScore(Submission submission, Integer graderUserId) {
-        Score score = scoreRepository.findFirstBySubmissionOrderByIdAsc(submission)
-                .orElseGet(() -> Score.builder().submission(submission).build());
-
-        List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
-        List<Answer> speakingAnswers = answers.stream()
-                .filter(a -> "SPEAKING".equals(normalizeType(a.getQuestion() != null ? a.getQuestion().getQuestionType() : null)))
-                .toList();
-
-        if (!speakingAnswers.isEmpty()) {
-            List<Feedback> speakingFeedbacks = feedbackRepository.findByAnswerIn(speakingAnswers);
-            float sum = 0f;
-            int count = 0;
-            boolean allPublished = true;
-            for (Answer answer : speakingAnswers) {
-                Feedback feedback = speakingFeedbacks.stream()
-                        .filter(f -> f.getAnswer() != null && answer.getId().equals(f.getAnswer().getId()))
-                        .findFirst()
-                        .orElse(null);
-                if (feedback == null || feedback.getReviewStatus() != WritingReviewStatus.PUBLISHED) {
-                    allPublished = false;
-                    continue;
-                }
-                if (feedback.getPublishedScore() != null) {
-                    sum += feedback.getPublishedScore();
-                    count++;
-                }
-            }
-            score.setSpeakingScore(allPublished && count > 0 ? sum / count : null);
-        }
-
-        score.setTotalScore(calculateTotal(score.getMcScore(), score.getWritingScore(), score.getSpeakingScore()));
-        score.setGradedBy(graderUserId);
-        score.setGradedAt(LocalDateTime.now());
-        scoreRepository.save(score);
-    }
-
     private SpeakingReviewResponse toResponse(Feedback feedback) {
         return SpeakingReviewResponse.builder()
                 .answerId(feedback.getAnswer() != null ? feedback.getAnswer().getId() : null)
@@ -226,21 +182,6 @@ public class SpeakingReviewService {
                 .publishedBy(feedback.getPublishedBy())
                 .publishedAt(feedback.getPublishedAt())
                 .build();
-    }
-
-    private static float calculateTotal(Float mc, Float writing, Float speaking) {
-        List<Float> parts = new ArrayList<>();
-        if (mc != null) parts.add(mc);
-        if (writing != null) parts.add(writing);
-        if (speaking != null) parts.add(speaking);
-        if (parts.isEmpty()) {
-            return 0f;
-        }
-        float sum = 0f;
-        for (Float part : parts) {
-            sum += part;
-        }
-        return sum / parts.size();
     }
 
     private static String normalizeType(String questionType) {

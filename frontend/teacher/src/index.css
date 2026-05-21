@@ -29,6 +29,13 @@
     outline-offset: 2px;
   }
 
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  button:focus-visible {
+    outline: none;
+  }
+
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;

@@ -24,7 +24,7 @@ public class MediaController {
     private final MediaService mediaService;
 
     /**
-     * Upload an audio file. Returns { url: "/api/media/files/xxx.webm" }.
+     * Upload an audio file. Returns { url: "/uploads/audio/listening/xxx.webm" }.
      */
     @PostMapping("/upload")
     @PreAuthorize("hasAnyRole('TEACHER','ADMIN')")
@@ -34,9 +34,10 @@ public class MediaController {
     }
 
     /**
-     * Serve a previously uploaded file.
+     * Serve legacy files uploaded before listening-path migration (requires JWT).
      */
     @GetMapping("/files/{filename:.+}")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Resource> serveFile(@PathVariable String filename) throws MalformedURLException {
         Path filePath = mediaService.resolveFile(filename);
         Resource resource = new UrlResource(filePath.toUri());

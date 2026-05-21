@@ -1,3 +1,11 @@
+FROM eclipse-temurin:21-jdk AS build
+
+WORKDIR /workspace
+COPY mvnw pom.xml ./
+COPY .mvn .mvn
+COPY src src
+RUN sed -i 's/\r$//' ./mvnw && chmod +x ./mvnw && ./mvnw -q -DskipTests package
+
 FROM eclipse-temurin:21-jre
 
 RUN apt-get update \
@@ -5,7 +13,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY target/englishsystem-1.0.0.jar /app/app.jar
+COPY --from=build /workspace/target/englishsystem-1.0.0.jar /app/app.jar
 
 RUN useradd --create-home --uid 10001 spring \
     && chown -R spring:spring /app

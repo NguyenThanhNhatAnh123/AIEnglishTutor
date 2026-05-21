@@ -54,7 +54,7 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="fixed left-0 top-0 z-30 flex h-screen w-64 flex-col border-r border-slate-200 bg-white shadow-sm">
+    <aside className="fixed left-0 top-0 z-30 hidden h-screen w-64 flex-col border-r border-slate-200 bg-white shadow-sm md:flex">
       {/* Brand */}
       <div className="border-b border-slate-200 px-6 py-5">
         <div className="flex items-center gap-3">

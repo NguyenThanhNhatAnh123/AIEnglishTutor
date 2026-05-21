@@ -91,24 +91,42 @@ export default function RegisterPage() {
       </div>
 
       {/* Right */}
-      <div className="flex items-center justify-center p-8 bg-slate-50">
-        <div className="w-full max-w-sm">
+      <div className="flex min-h-screen flex-1 flex-col justify-center overflow-y-auto bg-slate-50 p-6 sm:p-8">
+        <div className="mx-auto w-full max-w-sm py-4">
           <div className="mb-8">
+            <div className="mb-6 flex items-center gap-2 lg:hidden">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600">
+                <svg className="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                </svg>
+              </div>
+              <span className="font-bold text-slate-800">AI English Tutor</span>
+            </div>
             <h1 className="text-2xl font-bold text-slate-800">Create an account</h1>
-            <p className="text-slate-500 mt-1 text-sm">Get started with your free student account</p>
+            <p className="mt-1 text-sm text-slate-500">Get started with your free student account</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {fields.map(({ id, label, type, placeholder }) => (
               <div key={id}>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>
+                <label htmlFor={`register-${id}`} className="mb-1.5 block text-sm font-medium text-slate-700">
+                  {label}
+                </label>
                 <input
+                  id={`register-${id}`}
                   type={type}
+                  autoComplete={
+                    id === 'email' ? 'email'
+                      : id === 'password' ? 'new-password'
+                        : id === 'confirmPassword' ? 'new-password'
+                          : id === 'username' ? 'username'
+                            : 'name'
+                  }
                   value={form[id]}
                   onChange={set(id)}
                   placeholder={placeholder}
                   required
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-slate-800 placeholder-slate-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
             ))}

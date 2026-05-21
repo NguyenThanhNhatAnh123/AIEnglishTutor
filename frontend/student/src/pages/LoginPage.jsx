@@ -81,10 +81,10 @@ export default function LoginPage() {
       </div>
 
       {/* Right panel – form */}
-      <div className="flex items-center justify-center p-8 bg-slate-50">
-        <div className="w-full max-w-sm">
+      <div className="flex min-h-screen flex-1 flex-col justify-center overflow-y-auto bg-slate-50 p-6 sm:p-8">
+        <div className="mx-auto w-full max-w-sm py-4">
           <div className="mb-8">
-            <div className="flex items-center gap-2 mb-6 lg:hidden">
+            <div className="mb-6 flex items-center gap-2 lg:hidden">
               <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
                 <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -99,24 +99,32 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
+              <label htmlFor="student-login-email" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Email
+              </label>
               <input
+                id="student-login-email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 required
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-slate-800 placeholder-slate-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
+              <label htmlFor="student-login-password" className="mb-1.5 block text-sm font-medium text-slate-700">
+                Password
+              </label>
               <input
+                id="student-login-password"
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-slate-800 placeholder-slate-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <Button type="submit" variant="primary" size="lg" loading={loading} className="w-full mt-2">
@@ -124,11 +132,20 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <p className="text-center text-sm text-slate-500 mt-6">
+          <p className="mt-6 text-center text-sm text-slate-500">
             Don&apos;t have an account?{' '}
-            <Link to="/register" className="text-blue-600 font-medium hover:underline">
+            <Link to="/register" className="font-medium text-blue-600 hover:underline">
               Register
             </Link>
+          </p>
+          <p className="mt-3 text-center text-sm text-slate-500">
+            Teacher?{' '}
+            <a
+              href={import.meta.env.VITE_TEACHER_PORTAL_URL || 'http://localhost:5174/login'}
+              className="font-medium text-blue-600 hover:underline"
+            >
+              Open Teacher Portal
+            </a>
           </p>
         </div>
       </div>

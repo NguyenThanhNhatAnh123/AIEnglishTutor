@@ -83,7 +83,15 @@ function Get-RenderedHtml {
     [string]$BrowserPath,
     [string]$Url
   )
-  $html = & $BrowserPath --headless=new --disable-gpu --virtual-time-budget=8000 --dump-dom $Url 2>$null | Out-String
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    # Headless Edge can emit non-fatal Chromium diagnostics on stderr. Keep the
+    # script strict for real failures, but do not treat browser stderr as fatal.
+    $ErrorActionPreference = "Continue"
+    $html = & $BrowserPath --headless=new --disable-gpu --virtual-time-budget=8000 --dump-dom $Url 2>$null | Out-String
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
   if ([string]::IsNullOrWhiteSpace($html)) {
     throw "Failed to render DOM from $Url"
   }

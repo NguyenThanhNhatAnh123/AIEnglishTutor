@@ -6,11 +6,13 @@ import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
 import com.ai.englishsystem.common.util.SecurityUtils;
+import com.ai.englishsystem.config.CacheNames;
 import com.ai.englishsystem.user.dto.UserRequest;
 import com.ai.englishsystem.user.dto.UserResponse;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -50,6 +52,7 @@ public class UserService {
     }
 
     @Transactional
+    @CacheEvict(value = CacheNames.TEACHERS, allEntries = true)
     public UserResponse create(UserRequest request) {
         if (userRepository.existsByEmail(request.getEmail())) {
             throw new BadRequestException("Email already exists");
@@ -67,10 +70,14 @@ public class UserService {
             }
         }
 
+        if (request.getPassword() == null || request.getPassword().isBlank()) {
+            throw new BadRequestException("Password is required");
+        }
+
         User user = User.builder()
                 .username(request.getUsername())
                 .email(request.getEmail())
-                .password(passwordEncoder.encode(request.getPassword() != null ? request.getPassword() : "password123"))
+                .password(passwordEncoder.encode(request.getPassword()))
                 .fullName(request.getFullName())
                 .role(role)
                 .status(request.getStatus() != null ? request.getStatus() : "ACTIVE")
@@ -85,6 +92,7 @@ public class UserService {
     }
 
     @Transactional
+    @CacheEvict(value = CacheNames.TEACHERS, allEntries = true)
     public UserResponse update(Integer id, UserRequest request) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("User", id));
@@ -105,6 +113,7 @@ public class UserService {
     }
 
     @Transactional
+    @CacheEvict(value = CacheNames.TEACHERS, allEntries = true)
     public void delete(Integer id) {
         if (!userRepository.existsById(id)) {
             throw new NotFoundException("User", id);

@@ -42,15 +42,30 @@ public class StudentService {
 
     @Transactional(readOnly = true)
     public List<StudentResponse> findAll() {
-        return studentRepository.findAll().stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+        if (SecurityUtils.hasRole("ADMIN")) {
+            return studentRepository.findAll().stream()
+                    .map(this::toResponse)
+                    .collect(Collectors.toList());
+        }
+        if (SecurityUtils.hasRole("TEACHER")) {
+            return studentRepository.findAllByTeacherUserId(SecurityUtils.getCurrentUserId()).stream()
+                    .map(this::toResponse)
+                    .collect(Collectors.toList());
+        }
+        throw new ForbiddenException("Access denied");
     }
 
     @Transactional(readOnly = true)
     public Page<StudentResponse> findAll(Pageable pageable) {
-        return studentRepository.findAllBy(pageable)
-                .map(this::toResponse);
+        if (SecurityUtils.hasRole("ADMIN")) {
+            return studentRepository.findAllBy(pageable)
+                    .map(this::toResponse);
+        }
+        if (SecurityUtils.hasRole("TEACHER")) {
+            return studentRepository.findAllByTeacherUserId(SecurityUtils.getCurrentUserId(), pageable)
+                    .map(this::toResponse);
+        }
+        throw new ForbiddenException("Access denied");
     }
 
     @Transactional
@@ -80,6 +95,7 @@ public class StudentService {
     public StudentResponse findById(Integer id) {
         Student student = studentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Student", id));
+        assertTeacherCanAccessStudent(student);
         return toResponse(student);
     }
 
@@ -87,6 +103,7 @@ public class StudentService {
     public StudentResponse update(Integer id, StudentUpdateRequest request) {
         Student student = studentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Student", id));
+        assertTeacherCanAccessStudent(student);
         User user = student.getUser();
 
         if (request.getStudentCode() != null && !request.getStudentCode().isBlank()) {
@@ -123,11 +140,27 @@ public class StudentService {
     public void delete(Integer id) {
         Student student = studentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Student", id));
+        assertTeacherCanAccessStudent(student);
         if (submissionRepository.existsByStudent_Id(id)) {
             throw new BadRequestException("Cannot delete a student who has exam submissions");
         }
         classStudentRepository.deleteByStudentId(id);
         studentRepository.delete(student);
+    }
+
+    private void assertTeacherCanAccessStudent(Student student) {
+        if (SecurityUtils.hasRole("ADMIN")) {
+            return;
+        }
+        if (SecurityUtils.hasRole("TEACHER")) {
+            boolean allowed = classStudentRepository.existsByStudentIdAndTeacherUserId(
+                    student.getId(), SecurityUtils.getCurrentUserId());
+            if (!allowed) {
+                throw new ForbiddenException("You do not have permission to access this student");
+            }
+            return;
+        }
+        throw new ForbiddenException("Access denied");
     }
 
     private StudentResponse toResponse(Student student) {

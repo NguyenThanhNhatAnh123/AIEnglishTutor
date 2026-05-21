@@ -6,13 +6,66 @@ import { PageLoader } from '../components/common/LoadingSpinner';
 
 function StatCard({ label, value, icon, color }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl ${color}`}>
         {icon}
       </div>
       <div>
-        <p className="text-3xl font-extrabold text-slate-900">{value}</p>
+        <p className="text-2xl font-extrabold text-slate-900">{value}</p>
         <p className="mt-1 text-sm font-medium text-slate-500">{label}</p>
+      </div>
+    </div>
+  );
+}
+
+function ActionCard({ eyebrow, title, description, to, action, tone = 'blue', reload = false }) {
+  const tones = {
+    blue: 'border-blue-100 bg-blue-50/70 text-blue-700',
+    amber: 'border-amber-100 bg-amber-50/80 text-amber-700',
+    emerald: 'border-emerald-100 bg-emerald-50/80 text-emerald-700',
+  };
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${tones[tone]}`}>
+        {eyebrow}
+      </span>
+      <h3 className="mt-3 text-lg font-extrabold text-slate-900">{title}</h3>
+      <p className="mt-1 text-sm leading-relaxed text-slate-500">{description}</p>
+      {reload ? (
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-4 inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
+        >
+          {action}
+        </button>
+      ) : (
+        <Link
+          to={to}
+          className="mt-4 inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
+        >
+          {action}
+        </Link>
+      )}
+    </article>
+  );
+}
+
+function SkillFocus({ title, detail, value, tone }) {
+  const toneClass = {
+    blue: 'bg-blue-50 text-blue-700',
+    amber: 'bg-amber-50 text-amber-700',
+    emerald: 'bg-emerald-50 text-emerald-700',
+    slate: 'bg-slate-100 text-slate-600',
+  }[tone];
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-extrabold text-slate-900">{title}</p>
+          <p className="mt-1 text-xs leading-relaxed text-slate-500">{detail}</p>
+        </div>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ${toneClass}`}>{value}</span>
       </div>
     </div>
   );
@@ -37,14 +90,21 @@ export default function Dashboard() {
   const [exams, setExams] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadWarning, setLoadWarning] = useState(null);
 
   useEffect(() => {
-    Promise.all([
+    Promise.allSettled([
       studentExamApi.getActiveExams().then((r) => r.data?.data || []),
-      submissionApi.getMy().then((r) => r.data?.data || []).catch(() => []),
+      submissionApi.getMy().then((r) => r.data?.data || []),
     ])
-      .then(([e, s]) => { setExams(e); setSubmissions(s); })
-      .catch(() => {})
+      .then(([examResult, submissionResult]) => {
+        const warnings = [];
+        if (examResult.status === 'fulfilled') setExams(examResult.value);
+        else warnings.push('assigned exams');
+        if (submissionResult.status === 'fulfilled') setSubmissions(submissionResult.value);
+        else warnings.push('submission history');
+        setLoadWarning(warnings.length ? `Could not refresh ${warnings.join(' and ')}.` : null);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -80,56 +140,104 @@ export default function Dashboard() {
   const recentAttempts = [...submissions]
     .sort((a, b) => getLatestAttemptTime(b) - getLatestAttemptTime(a))
     .slice(0, 8);
+  const latestInProgress = [...inProgressSubmissions]
+    .sort((a, b) => getLatestAttemptTime(b) - getLatestAttemptTime(a))[0];
   const nextExam = exams.find((e) => !submittedExamIds.has(e.id));
+  const latestPublished = completedSubmissions.find((s) => s.totalScore != null);
+
+  const primaryAction = latestInProgress
+    ? {
+        eyebrow: 'Continue learning',
+        title: latestInProgress.examTitle || `Exam #${latestInProgress.examId}`,
+        description: 'You have an open attempt. Resume it before starting something new.',
+        to: `/exam/${latestInProgress.examId}`,
+        action: 'Resume exam',
+        tone: 'amber',
+      }
+    : nextExam
+      ? {
+          eyebrow: 'Next exam',
+          title: nextExam.title,
+          description: `${nextExam.durationMinutes || 0} minutes - ${nextExam.examType === 'OFFICIAL' ? 'Official exam' : 'Practice exam'}.`,
+          to: `/exam/${nextExam.id}`,
+          action: 'Start exam',
+          tone: nextExam.examType === 'OFFICIAL' ? 'amber' : 'blue',
+        }
+      : completedSubmissions.length
+        ? {
+            eyebrow: 'Feedback ready',
+            title: 'Review your latest results',
+            description: 'Check published scores, teacher notes, and the next skill to improve.',
+            to: '/submissions',
+            action: 'View feedback',
+            tone: 'emerald',
+          }
+        : {
+            eyebrow: loadWarning ? 'Needs attention' : 'Learning home',
+            title: loadWarning ? 'Refresh your learning data' : 'No assigned exams yet',
+            description: loadWarning
+              ? 'Some learning data could not be loaded. Try again before starting a session.'
+              : 'Your teacher has not assigned an active exam yet. This space will show the next activity when one is available.',
+            to: loadWarning ? '/dashboard' : '/exams',
+            action: loadWarning ? 'Refresh page' : 'Browse exams',
+            tone: loadWarning ? 'amber' : 'blue',
+            reload: Boolean(loadWarning),
+          };
+
+  const writingCount = submissions.reduce((sum, s) => sum + toNumber(s.writingAnswerCount), 0);
+  const speakingCount = submissions.reduce((sum, s) => sum + toNumber(s.speakingAnswerCount), 0);
+  const pendingReviewCount = submissions.filter((s) => s.subjectiveReviewStatus === 'PENDING').length;
+  const practiceNext = averageScore == null
+    ? 'Start with an assigned exam to unlock personalized practice.'
+    : averageScore >= 75
+      ? 'Keep momentum with timed practice and review any teacher notes.'
+      : 'Review feedback first, then repeat the weakest skill in a shorter practice round.';
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 bg-slate-950 p-6 text-white shadow-sm">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+    <div className="space-y-5">
+      {loadWarning && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+          {loadWarning} Some numbers may be incomplete.
+        </div>
+      )}
+
+      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-sm font-bold uppercase tracking-wide text-blue-200">Student cockpit</p>
-            <h2 className="mt-2 text-3xl font-extrabold">{user?.fullName || user?.username || 'Student'}</h2>
-            <p className="mt-2 max-w-2xl text-sm text-slate-300">Follow assigned exams, open sessions, and published scores from one clean workspace.</p>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Learning home</p>
+            <h2 className="mt-2 text-2xl font-extrabold text-slate-950 sm:text-3xl">
+              Welcome back, {user?.fullName || user?.username || 'Student'}
+            </h2>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-500">
+              Pick up the next exam, review feedback, and focus on the skill that needs the most attention.
+            </p>
           </div>
-          <div className="rounded-2xl bg-white p-4 text-slate-950 shadow-sm">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Completion</p>
+          <div className="rounded-xl bg-slate-950 p-4 text-white shadow-sm lg:min-w-44">
+            <p className="text-xs font-bold uppercase tracking-wide text-blue-200">Completion</p>
             <p className="mt-1 text-3xl font-extrabold">{completionRate}%</p>
-            <p className="text-xs text-slate-500">{completedExamCount}/{exams.length || 0} exams completed</p>
+            <p className="text-xs text-slate-300">{completedExamCount}/{exams.length || 0} exams completed</p>
           </div>
         </div>
-      </div>
+      </section>
 
-      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Next action</p>
-              <h3 className="mt-1 text-xl font-extrabold text-slate-900">
-                {nextExam ? nextExam.title : 'All assigned exams completed'}
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">
-                {nextExam ? `${nextExam.durationMinutes || 0} minutes - ${nextExam.examType === 'OFFICIAL' ? 'Official' : 'Practice'}` : 'Check submissions for published reviews and feedback.'}
-              </p>
-            </div>
-            <Link
-              to={nextExam ? `/exam/${nextExam.id}` : '/submissions'}
-              className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700"
-            >
-              {nextExam ? 'Open exam' : 'View results'}
+      <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+        <ActionCard {...primaryAction} />
+        <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Practice next</p>
+          <h3 className="mt-2 text-xl font-extrabold text-slate-900">{formatScore(averageScore)} average score</h3>
+          <p className="mt-2 text-sm leading-relaxed text-slate-500">{practiceNext}</p>
+          {latestPublished && (
+            <Link to={`/result/${latestPublished.id}`} className="mt-4 inline-flex text-sm font-bold text-blue-600 hover:underline">
+              Open latest result
             </Link>
-          </div>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Score health</p>
-          <p className="mt-2 text-3xl font-extrabold text-slate-900">{formatScore(averageScore)}</p>
-          <p className="text-sm text-slate-500">Average across published scores</p>
-        </div>
+          )}
+        </article>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard
-          label="Assigned Exams"
-          value={exams.length}
+          label="To do"
+          value={pendingExamCount}
           color="bg-blue-50 text-blue-600"
           icon={
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -139,8 +247,8 @@ export default function Dashboard() {
           }
         />
         <StatCard
-          label="Completed Exams"
-          value={completedExamCount}
+          label="In progress"
+          value={inProgressSubmissions.length}
           color="bg-green-50 text-green-600"
           icon={
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -149,8 +257,8 @@ export default function Dashboard() {
           }
         />
         <StatCard
-          label="Pending Exams"
-          value={pendingExamCount}
+          label="Pending review"
+          value={pendingReviewCount}
           color="bg-amber-50 text-amber-600"
           icon={
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -159,118 +267,69 @@ export default function Dashboard() {
             </svg>
           }
         />
-        <StatCard
-          label="Total Score"
-          value={formatScore(totalScore)}
-          color="bg-violet-50 text-violet-600"
-          icon={
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M12 8c-2.761 0-5 1.567-5 3.5S9.239 15 12 15s5 1.567 5 3.5S14.761 22 12 22m0-14V2m0 20v-7" />
-            </svg>
-          }
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <SkillFocus
+          title="Writing"
+          detail="Use teacher comments and written answers to decide what to rewrite next."
+          value={writingCount || 'No data'}
+          tone={writingCount ? 'blue' : 'slate'}
         />
-        <StatCard
-          label="Average Score"
-          value={formatScore(averageScore)}
-          color="bg-cyan-50 text-cyan-700"
-          icon={
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M9 17v-6m4 6V7m4 10v-3M5 21h14" />
-            </svg>
-          }
+        <SkillFocus
+          title="Speaking"
+          detail="Review recordings and published feedback before the next speaking prompt."
+          value={speakingCount || 'No data'}
+          tone={speakingCount ? 'emerald' : 'slate'}
         />
-        <StatCard
-          label="Best Score"
-          value={formatScore(bestScore)}
-          color="bg-emerald-50 text-emerald-700"
-          icon={
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="m5 13 4 4L19 7" />
-            </svg>
-          }
+        <SkillFocus
+          title="Score health"
+          detail={`${scoreBands.needsWork} result(s) need more practice; best score ${formatScore(bestScore)}.`}
+          value={averageScore == null ? 'New' : averageScore >= 75 ? 'Strong' : 'Practice'}
+          tone={averageScore == null ? 'slate' : averageScore >= 75 ? 'emerald' : 'amber'}
         />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="card !p-5">
-          <h3 className="section-title">Completion Rate</h3>
-          <div className="mt-4">
-            <div className="h-3 rounded-full bg-slate-100 overflow-hidden">
-              <div className="h-full bg-blue-600" style={{ width: `${completionRate}%` }} />
-            </div>
-            <p className="mt-2 text-sm text-slate-600">
-              {completionRate}% ({completedExamCount}/{exams.length || 0} exams completed)
-            </p>
-            <p className="mt-1 text-xs text-slate-400">
-              In progress submissions: {inProgressSubmissions.length}
-            </p>
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900">Recent activity</h3>
+            <p className="text-xs text-slate-500">Latest attempts, scores, and review states.</p>
           </div>
-        </div>
-        <div className="card !p-5">
-          <h3 className="section-title">Score Distribution</h3>
-          <div className="mt-4 space-y-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600">Strong (&gt;=75)</span>
-              <span className="font-semibold text-emerald-700">{scoreBands.strong}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600">Average (50-74.9)</span>
-              <span className="font-semibold text-amber-700">{scoreBands.average}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-slate-600">Needs work (&lt;50)</span>
-              <span className="font-semibold text-rose-700">{scoreBands.needsWork}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="card !p-0 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-700">Recent Attempts</h3>
           <Link to="/submissions" className="text-sm text-blue-600 hover:underline font-medium">View all</Link>
         </div>
         {recentAttempts.length === 0 ? (
-          <div className="p-8 text-center text-sm text-slate-400">No submission data yet.</div>
+          <div className="p-8 text-center">
+            <p className="text-sm font-semibold text-slate-700">No learning activity yet</p>
+            <p className="mt-1 text-sm text-slate-400">Start an exam to see your progress and feedback here.</p>
+          </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[720px]">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Exam</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Status</th>
-                  <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500 uppercase">Latest Time</th>
-                  <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500 uppercase">Score</th>
-                  <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500 uppercase">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {recentAttempts.map((s) => (
-                  <tr key={s.id}>
-                    <td className="px-4 py-2 text-slate-700">{s.examTitle || `Exam #${s.examId}`}</td>
-                    <td className="px-4 py-2">
-                      <span className={`text-xs font-semibold ${
-                        completedStatuses.has(s.status) ? 'text-emerald-700' : 'text-amber-700'
-                      }`}>
-                        {s.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2 text-xs text-slate-500">
-                      {(s.endTime || s.submitTime || s.startTime)
-                        ? new Date(s.endTime || s.submitTime || s.startTime).toLocaleString()
-                        : '-'}
-                    </td>
-                    <td className="px-4 py-2 text-center font-semibold text-blue-700">{formatScore(s.totalScore)}</td>
-                    <td className="px-4 py-2 text-right">
-                      <Link to={`/result/${s.id}`} className="text-xs text-blue-600 hover:underline">View Result</Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="divide-y divide-slate-100">
+            {recentAttempts.map((s) => (
+              <div key={s.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900">{s.examTitle || `Exam #${s.examId}`}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {(s.endTime || s.submitTime || s.startTime)
+                      ? new Date(s.endTime || s.submitTime || s.startTime).toLocaleString()
+                      : 'No activity time'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                    completedStatuses.has(s.status) ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                  }`}>
+                    {s.status}
+                  </span>
+                  <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+                    Score {formatScore(s.totalScore)}
+                  </span>
+                  <Link to={completedStatuses.has(s.status) ? `/result/${s.id}` : `/exam/${s.examId}`} className="text-xs font-bold text-blue-600 hover:underline">
+                    {completedStatuses.has(s.status) ? 'View result' : 'Resume'}
+                  </Link>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

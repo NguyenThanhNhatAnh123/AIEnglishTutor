@@ -51,4 +51,10 @@ class MediaControllerSecurityTest {
                 .andExpect(status().isNotFound())
                 .andExpect(header().doesNotExist("WWW-Authenticate"));
     }
+
+    @Test
+    void anonymousUserCannotAccessLegacyMediaFiles() throws Exception {
+        mockMvc.perform(get("/api/media/files/legacy-prompt.mp3"))
+                .andExpect(status().isUnauthorized());
+    }
 }
