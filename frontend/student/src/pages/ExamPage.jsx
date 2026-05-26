@@ -7,11 +7,22 @@ import Button from '../components/common/Button';
 import ExamTimer from '../components/ExamTimer';
 import AudioPlayer from '../../../packages/ui/AudioPlayer.jsx';
 import SpeakingRecorder from '../components/exam/SpeakingRecorder.jsx';
+import examRoomMainBg from '../assets/exam/backgrounds/exam-room-main-bg.jpg';
+import examRoomStatCardBg from '../assets/exam/backgrounds/exam-room-stat-card-bg.jpg';
+import examRoomPanelBg from '../assets/exam/backgrounds/exam-room-panel-bg.jpg';
 
 function resolveAudioSrc(url) {
   if (!url) return null;
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) return url;
   return `${API_ORIGIN}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
+function examRoomBackground(image, overlay = 'rgba(255,255,255,0.92)') {
+  return {
+    backgroundImage: `linear-gradient(90deg, ${overlay}, rgba(255,255,255,0.7)), url(${image})`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  };
 }
 
 function detectDeviceType() {
@@ -388,7 +399,10 @@ function statusTone(ok, waiting = false) {
 
 function WaitingCheck({ label, detail, ok, waiting, action }) {
   return (
-    <div className={`rounded-xl border p-4 ${statusTone(ok, waiting)}`}>
+    <div
+      className={`rounded-xl border p-4 ${statusTone(ok, waiting)}`}
+      style={examRoomBackground(examRoomStatCardBg, ok ? 'rgba(236,253,245,0.94)' : waiting ? 'rgba(248,250,252,0.94)' : 'rgba(255,251,235,0.94)')}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-bold">{label}</p>
@@ -1023,7 +1037,10 @@ export default function ExamPage() {
       {/* ─── Pre-start screen ──────────────────────────────────────── */}
       {!submission ? (
         <div className="flex items-center justify-center py-10 px-4">
-          <div className="card max-w-5xl w-full dark:bg-slate-900 dark:border-slate-700">
+          <div
+            className="card max-w-5xl w-full dark:bg-slate-900 dark:border-slate-700"
+            style={examRoomBackground(examRoomMainBg, 'rgba(255,255,255,0.9)')}
+          >
             <div className="w-16 h-16 rounded-full bg-blue-50 dark:bg-slate-800 flex items-center justify-center text-blue-500 mx-auto mb-4">
               <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -1034,25 +1051,25 @@ export default function ExamPage() {
             <p className="text-slate-500 dark:text-slate-300 text-sm text-center mb-6">{exam.description || 'No description.'}</p>
 
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center" style={examRoomBackground(examRoomStatCardBg, 'rgba(255,255,255,0.94)')}>
                 <p className="text-xs uppercase tracking-wide text-slate-500">Exam type</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">
                   {exam.examType === 'OFFICIAL' ? 'Official' : 'Practice'}
                 </p>
               </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center" style={examRoomBackground(examRoomStatCardBg, 'rgba(255,255,255,0.94)')}>
                 <p className="text-xs uppercase tracking-wide text-slate-500">Duration</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{exam.durationMinutes} min</p>
               </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center" style={examRoomBackground(examRoomStatCardBg, 'rgba(255,255,255,0.94)')}>
                 <p className="text-xs uppercase tracking-wide text-slate-500">Questions</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{allQuestions.length}</p>
               </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 text-center" style={examRoomBackground(examRoomStatCardBg, 'rgba(255,255,255,0.94)')}>
                 <p className="text-xs uppercase tracking-wide text-slate-500">Sections</p>
                 <p className="text-lg font-bold text-slate-800 dark:text-slate-100 mt-1">{exam.sections?.length || 0}</p>
               </div>
-              <div className="rounded-xl border border-blue-100 dark:border-slate-700 bg-blue-50/60 dark:bg-slate-800 p-4 text-center col-span-2 sm:col-span-1">
+              <div className="rounded-xl border border-blue-100 dark:border-slate-700 bg-blue-50/60 dark:bg-slate-800 p-4 text-center col-span-2 sm:col-span-1" style={examRoomBackground(examRoomStatCardBg, 'rgba(239,246,255,0.94)')}>
                 <p className="text-xs uppercase tracking-wide text-blue-600 dark:text-blue-300">Attempts</p>
                 <p className="text-sm font-bold text-blue-800 dark:text-blue-100 mt-1">{attemptLimitText}</p>
                 {exam.completedAttempts != null && (
@@ -1080,7 +1097,7 @@ export default function ExamPage() {
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4" style={examRoomBackground(examRoomPanelBg, 'rgba(255,255,255,0.93)')}>
                 <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-2">Exam structure</p>
                 <div className="space-y-2 max-h-44 overflow-auto pr-1">
                   {(exam.sections || []).map((s) => (
@@ -1100,7 +1117,7 @@ export default function ExamPage() {
                   )}
                 </div>
               </div>
-              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4" style={examRoomBackground(examRoomPanelBg, 'rgba(255,255,255,0.93)')}>
                 <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">Waiting room</p>
                 <div className="space-y-3">
                   <WaitingCheck

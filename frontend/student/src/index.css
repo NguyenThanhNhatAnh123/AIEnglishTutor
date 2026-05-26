@@ -70,6 +70,25 @@
     color: #2563eb;
   }
 
+  .sidebar-learning-link {
+    @apply relative flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-bold text-slate-700 transition-all duration-200;
+    @apply hover:bg-white hover:text-blue-700 hover:shadow-sm;
+  }
+
+  .sidebar-learning-link.active {
+    @apply bg-white text-blue-700 shadow-sm ring-1 ring-blue-100;
+  }
+
+  .sidebar-learning-link svg {
+    color: #2563eb;
+    transition: transform 200ms ease;
+  }
+
+  .sidebar-learning-link:hover svg,
+  .sidebar-learning-link.active svg {
+    transform: translateY(-1px) scale(1.04);
+  }
+
   .card {
     @apply bg-white rounded-2xl shadow-sm border border-slate-100 p-5;
   }

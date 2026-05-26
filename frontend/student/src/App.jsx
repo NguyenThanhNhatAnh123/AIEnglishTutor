@@ -1,18 +1,28 @@
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ErrorBoundary } from '../../packages/ui/ErrorBoundary';
 import { APP_BASE_PATH } from '../../packages/utils/constants.js';
 import Layout from './components/layout/Layout';
 
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import Dashboard from './pages/Dashboard';
-import ExamList from './pages/ExamList';
-import ExamPage from './pages/ExamPage';
-import ExamResult from './pages/ExamResult';
-import Profile from './pages/Profile';
-import SubmissionHistory from './pages/SubmissionHistory';
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const RegisterPage = lazy(() => import('./pages/RegisterPage'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ExamList = lazy(() => import('./pages/ExamList'));
+const ExamPage = lazy(() => import('./pages/ExamPage'));
+const ExamResult = lazy(() => import('./pages/ExamResult'));
+const Profile = lazy(() => import('./pages/Profile'));
+const SubmissionHistory = lazy(() => import('./pages/SubmissionHistory'));
+const Learning = lazy(() => import('./pages/Learning'));
+
+function PageFallback() {
+  return (
+    <div className="min-h-screen bg-slate-50 px-4 py-10 text-center text-sm font-semibold text-slate-500">
+      Loading...
+    </div>
+  );
+}
 
 function ProtectedLayout() {
   const { user } = useAuth();
@@ -30,6 +40,7 @@ function AppRoutes() {
       <Route element={<ProtectedLayout />}>
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/exams" element={<ExamList />} />
+        <Route path="/learning" element={<Learning />} />
         <Route path="/submissions" element={<SubmissionHistory />} />
         <Route path="/profile" element={<Profile />} />
       </Route>
@@ -73,7 +84,9 @@ export default function App() {
       <BrowserRouter basename={APP_BASE_PATH || undefined}>
         <AuthProvider>
           <ToastProvider>
-            <AppRoutes />
+            <Suspense fallback={<PageFallback />}>
+              <AppRoutes />
+            </Suspense>
           </ToastProvider>
         </AuthProvider>
       </BrowserRouter>

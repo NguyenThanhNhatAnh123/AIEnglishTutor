@@ -10,6 +10,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./learningservice/src/main/resources/db/init:/docker-entrypoint-initdb.d:ro
     command:
       - --default-authentication-plugin=mysql_native_password
       - --character-set-server=utf8mb4
@@ -83,6 +84,8 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      learningservice:
+        condition: service_healthy
     ports:
       - "${NGINX_HTTP_PORT:-8088}:80"
 
@@ -98,8 +101,51 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      learningservice:
+        condition: service_healthy
     ports:
       - "9090:9090"
+
+  learningservice:
+    build:
+      context: ./learningservice
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      LEARNING_DB_URL: ${LEARNING_DB_URL:-jdbc:mysql://host.docker.internal:${APP_DB_PORT:-3306}/${LEARNING_DB_NAME:-ai_english_learning}?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+      LEARNING_DB_USERNAME: ${LEARNING_DB_USERNAME:-root}
+      LEARNING_SERVER_PORT: "8081"
+      LEARNING_CORS_ALLOWED_ORIGINS: ${LEARNING_CORS_ALLOWED_ORIGINS:-http://localhost:8088,http://127.0.0.1:8088,http://localhost,http://127.0.0.1,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174}
+      LEARNING_FLYWAY_ENABLED: "true"
+      LEARNING_JPA_DDL_AUTO: validate
+      LEARNING_CACHE_TYPE: redis
+      LEARNING_REDIS_HOST: redis
+      LEARNING_REDIS_PORT: "6379"
+      LEARNING_REDIS_TIMEOUT: "1s"
+      LEARNING_REDIS_HEALTH_ENABLED: "true"
+      LEARNING_DB_POOL_MAX: "20"
+      LEARNING_DB_POOL_MIN_IDLE: "5"
+      LEARNING_DB_POOL_TIMEOUT: "10000"
+      LEARNING_DB_POOL_KEEPALIVE: "180000"
+      LEARNING_DB_VALIDATION_TIMEOUT: "2000"
+      LEARNING_JPA_BATCH_SIZE: "50"
+      LEARNING_TX_TIMEOUT_SECONDS: "15"
+      LEARNING_TOMCAT_THREADS: "60"
+      LEARNING_TOMCAT_ACCEPT: "120"
+      LEARNING_TOMCAT_MAX_CONN: "300"
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/actuator/health | grep -q UP"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
 
   redis:
     image: redis:7-alpine
@@ -129,7 +175,7 @@ services:
       OCR_ALLOW_TESSERACT_FALLBACK: "1"
       TESS_LANG: eng
     ports:
-      - "8002:8002"
+      - "${AISERVICE_HOST_BIND:-127.0.0.1}:${AISERVICE_HOST_PORT:-8002}:8002"
     volumes:
       - aiservice_cache:/root/.cache
     healthcheck:

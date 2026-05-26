@@ -5,6 +5,16 @@ import Badge from '../components/common/Badge';
 import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import { useToast } from '../context/ToastContext';
+import submissionHeaderBg from '../assets/exam/backgrounds/submission-header-bg.jpg';
+import submissionCardBg from '../assets/exam/backgrounds/submission-card-bg.jpg';
+
+function submissionBackground(image, overlay = 'rgba(255, 255, 255, 0.92)') {
+  return {
+    backgroundImage: `linear-gradient(135deg, ${overlay}, rgba(255, 255, 255, 0.76)), url(${image})`,
+    backgroundPosition: 'center',
+    backgroundSize: 'cover',
+  };
+}
 
 function formatDate(value) {
   return value ? new Date(value).toLocaleString() : '-';
@@ -48,7 +58,10 @@ function SubmissionCard({ submission }) {
       : '-';
 
   return (
-    <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <article
+      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+      style={submissionBackground(submissionCardBg, 'rgba(255, 255, 255, 0.94)')}
+    >
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -72,28 +85,43 @@ function SubmissionCard({ submission }) {
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <div className="rounded-xl bg-slate-50 p-3">
+        <div
+          className="rounded-xl bg-slate-50 p-3"
+          style={submissionBackground(submissionCardBg, 'rgba(255, 255, 255, 0.96)')}
+        >
           <p className="text-[11px] font-bold uppercase text-slate-500">Completion</p>
           <p className="mt-1 font-bold text-slate-900">{completion}</p>
           {submission.answeredQuestions != null && submission.totalQuestions != null && (
             <p className="text-xs text-slate-500">{submission.answeredQuestions}/{submission.totalQuestions} answers</p>
           )}
         </div>
-        <div className="rounded-xl bg-slate-50 p-3">
+        <div
+          className="rounded-xl bg-slate-50 p-3"
+          style={submissionBackground(submissionCardBg, 'rgba(255, 255, 255, 0.96)')}
+        >
           <p className="text-[11px] font-bold uppercase text-slate-500">Duration</p>
           <p className="mt-1 font-bold text-slate-900">{formatDuration(submission.durationSeconds)}</p>
         </div>
-        <div className="rounded-xl bg-slate-50 p-3">
+        <div
+          className="rounded-xl bg-slate-50 p-3"
+          style={submissionBackground(submissionCardBg, 'rgba(255, 255, 255, 0.96)')}
+        >
           <p className="text-[11px] font-bold uppercase text-slate-500">Writing</p>
           <p className="mt-1 font-bold text-slate-900">{reviewLabel(submission.writingReviewStatus)}</p>
           <p className="text-xs text-slate-500">{submission.writingAnswerCount || 0} answer(s)</p>
         </div>
-        <div className="rounded-xl bg-slate-50 p-3">
+        <div
+          className="rounded-xl bg-slate-50 p-3"
+          style={submissionBackground(submissionCardBg, 'rgba(255, 255, 255, 0.96)')}
+        >
           <p className="text-[11px] font-bold uppercase text-slate-500">Speaking</p>
           <p className="mt-1 font-bold text-slate-900">{reviewLabel(submission.speakingReviewStatus)}</p>
           <p className="text-xs text-slate-500">{submission.speakingAnswerCount || 0} answer(s)</p>
         </div>
-        <div className={`rounded-xl p-3 ${eventCount > 0 ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`}>
+        <div
+          className={`rounded-xl p-3 ${eventCount > 0 ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-800'}`}
+          style={submissionBackground(submissionCardBg, eventCount > 0 ? 'rgba(255, 251, 235, 0.96)' : 'rgba(236, 253, 245, 0.96)')}
+        >
           <p className="text-[11px] font-bold uppercase opacity-75">Integrity</p>
           <p className="mt-1 font-bold">{eventCount > 0 ? `${eventCount} event(s)` : 'Clean'}</p>
           <p className="text-xs opacity-75">{submission.deviceType || '-'}</p>
@@ -181,7 +209,10 @@ export default function SubmissionHistory() {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section
+        className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        style={submissionBackground(submissionHeaderBg, 'rgba(255, 255, 255, 0.9)')}
+      >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Submission center</p>
@@ -195,7 +226,11 @@ export default function SubmissionHistory() {
               ['Review', stats.pendingReview],
               ['Published', stats.published],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+              <div
+                key={label}
+                className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
+                style={submissionBackground(submissionCardBg, 'rgba(255, 255, 255, 0.95)')}
+              >
                 <p className="text-[11px] font-semibold uppercase text-slate-500">{label}</p>
                 <p className="text-xl font-bold text-blue-700">{value}</p>
               </div>

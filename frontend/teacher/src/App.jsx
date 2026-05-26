@@ -1,19 +1,28 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { ErrorBoundary } from '../../packages/ui/ErrorBoundary';
 import { APP_BASE_PATH } from '../../packages/utils/constants.js';
 
-import LoginPage from './pages/LoginPage';
-import Dashboard from './pages/Dashboard';
-import ClassManagement from './pages/ClassManagement';
-import Students from './pages/Students';
-import ExamManagement from './pages/ExamManagement';
-import QuestionBank from './pages/QuestionBank';
-import OcrWorkspace from './pages/OcrWorkspace';
-import StudentResults from './pages/StudentResults';
-import Analytics from './pages/Analytics';
-import Profile from './pages/Profile';
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ClassManagement = lazy(() => import('./pages/ClassManagement'));
+const Students = lazy(() => import('./pages/Students'));
+const ExamManagement = lazy(() => import('./pages/ExamManagement'));
+const QuestionBank = lazy(() => import('./pages/QuestionBank'));
+const OcrWorkspace = lazy(() => import('./pages/OcrWorkspace'));
+const StudentResults = lazy(() => import('./pages/StudentResults'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Profile = lazy(() => import('./pages/Profile'));
+
+function PageFallback() {
+  return (
+    <div className="min-h-screen bg-slate-50 px-4 py-10 text-center text-sm font-semibold text-slate-500">
+      Loading...
+    </div>
+  );
+}
 
 function PrivateRoute({ children }) {
   const { user } = useAuth();
@@ -47,7 +56,9 @@ export default function App() {
       <BrowserRouter basename={APP_BASE_PATH || undefined}>
         <AuthProvider>
           <ToastProvider>
-            <AppRoutes />
+            <Suspense fallback={<PageFallback />}>
+              <AppRoutes />
+            </Suspense>
           </ToastProvider>
         </AuthProvider>
       </BrowserRouter>

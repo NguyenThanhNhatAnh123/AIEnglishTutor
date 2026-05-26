@@ -3,10 +3,23 @@ import { Link } from 'react-router-dom';
 import { studentExamApi, submissionApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { PageLoader } from '../components/common/LoadingSpinner';
+import dashboardMainBg from '../assets/exam/backgrounds/dashboard-main-bg.jpg';
+import dashboardStatCardBg from '../assets/exam/backgrounds/dashboard-stat-card-bg.jpg';
+
+function dashboardBackground(image, overlay = 'rgba(255, 255, 255, 0.92)') {
+  return {
+    backgroundImage: `linear-gradient(135deg, ${overlay}, rgba(255, 255, 255, 0.74)), url(${image})`,
+    backgroundPosition: 'center',
+    backgroundSize: 'cover',
+  };
+}
 
 function StatCard({ label, value, icon, color }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div
+      className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+      style={dashboardBackground(dashboardStatCardBg, 'rgba(255, 255, 255, 0.94)')}
+    >
       <div className={`mb-4 flex h-11 w-11 items-center justify-center rounded-xl ${color}`}>
         {icon}
       </div>
@@ -25,7 +38,10 @@ function ActionCard({ eyebrow, title, description, to, action, tone = 'blue', re
     emerald: 'border-emerald-100 bg-emerald-50/80 text-emerald-700',
   };
   return (
-    <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <article
+      className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+      style={dashboardBackground(dashboardMainBg, 'rgba(255, 255, 255, 0.93)')}
+    >
       <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${tones[tone]}`}>
         {eyebrow}
       </span>
@@ -59,7 +75,10 @@ function SkillFocus({ title, detail, value, tone }) {
     slate: 'bg-slate-100 text-slate-600',
   }[tone];
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div
+      className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+      style={dashboardBackground(dashboardStatCardBg, 'rgba(255, 255, 255, 0.95)')}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-extrabold text-slate-900">{title}</p>
@@ -201,7 +220,10 @@ export default function Dashboard() {
         </div>
       )}
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section
+        className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+        style={dashboardBackground(dashboardMainBg, 'rgba(255, 255, 255, 0.9)')}
+      >
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-600">Learning home</p>
@@ -222,7 +244,10 @@ export default function Dashboard() {
 
       <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <ActionCard {...primaryAction} />
-        <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <article
+          className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+          style={dashboardBackground(dashboardMainBg, 'rgba(255, 255, 255, 0.94)')}
+        >
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Practice next</p>
           <h3 className="mt-2 text-xl font-extrabold text-slate-900">{formatScore(averageScore)} average score</h3>
           <p className="mt-2 text-sm leading-relaxed text-slate-500">{practiceNext}</p>
@@ -290,7 +315,10 @@ export default function Dashboard() {
         />
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div
+        className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+        style={dashboardBackground(dashboardMainBg, 'rgba(255, 255, 255, 0.95)')}
+      >
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
           <div>
             <h3 className="text-sm font-extrabold text-slate-900">Recent activity</h3>

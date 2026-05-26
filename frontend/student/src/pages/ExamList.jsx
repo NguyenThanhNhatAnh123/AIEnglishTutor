@@ -5,6 +5,9 @@ import Badge from '../components/common/Badge';
 import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import { useToast } from '../context/ToastContext';
+import statCardBg from '../assets/exam/backgrounds/exam-list-stat-card-bg.jpg';
+import filterStripBg from '../assets/exam/backgrounds/exam-list-filter-strip-bg.jpg';
+import activityCardBg from '../assets/exam/backgrounds/exam-list-activity-card-bg.jpg';
 
 const practiceModes = [
   {
@@ -23,6 +26,14 @@ const practiceModes = [
     tone: 'bg-amber-50 text-amber-700 border-amber-100',
   },
 ];
+
+function backgroundImageStyle(image, overlay = 'rgba(255,255,255,0.9)') {
+  return {
+    backgroundImage: `linear-gradient(90deg, ${overlay}, rgba(255,255,255,0.72)), url(${image})`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  };
+}
 
 function inferSkills(exam) {
   const text = `${exam.title || ''} ${exam.description || ''}`.toLowerCase();
@@ -125,7 +136,11 @@ export default function ExamList() {
               ['Practice', stats.practice],
               ['Resume', stats.resume],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+              <div
+                key={label}
+                className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2"
+                style={backgroundImageStyle(statCardBg, 'rgba(255,255,255,0.94)')}
+              >
                 <p className="text-[11px] font-semibold uppercase text-slate-500">{label}</p>
                 <p className="text-xl font-bold text-blue-700">{value}</p>
               </div>
@@ -142,7 +157,10 @@ export default function ExamList() {
           ))}
         </div>
 
-        <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto]">
+        <div
+          className="mt-5 grid gap-3 rounded-xl border border-slate-100 bg-white/90 p-3 lg:grid-cols-[1fr_auto]"
+          style={backgroundImageStyle(filterStripBg, 'rgba(255,255,255,0.88)')}
+        >
           <div className="relative">
             <svg
               className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400"
@@ -254,6 +272,7 @@ export default function ExamList() {
                 <div
                   key={exam.id}
                   className="card flex flex-col border border-slate-100 bg-slate-50/80 opacity-80"
+                  style={backgroundImageStyle(activityCardBg, 'rgba(255,255,255,0.96)')}
                   aria-disabled="true"
                 >
                   {card}
@@ -263,6 +282,7 @@ export default function ExamList() {
                   key={exam.id}
                   to={`/exam/${exam.id}`}
                   className="card group flex flex-col border border-slate-100 transition-all hover:border-blue-200 hover:shadow-md"
+                  style={backgroundImageStyle(activityCardBg, 'rgba(255,255,255,0.94)')}
                 >
                   {card}
                 </Link>

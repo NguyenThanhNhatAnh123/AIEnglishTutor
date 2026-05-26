@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
-const navItems = [
+const mainNavItems = [
   {
     to: '/dashboard',
     label: 'Dashboard',
@@ -44,6 +44,37 @@ const navItems = [
   },
 ];
 
+const learningNavItems = [
+  {
+    to: '/learning',
+    label: 'Vocabulary Quest',
+    meta: 'Daily review',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+          d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+      </svg>
+    ),
+  },
+];
+
+function SidebarLink({ item, featured = false }) {
+  return (
+    <NavLink
+      to={item.to}
+      className={({ isActive }) =>
+        `${featured ? 'sidebar-learning-link' : 'sidebar-link'} ${isActive ? 'active' : ''}`
+      }
+    >
+      {item.icon}
+      <span className="min-w-0">
+        <span className="block truncate">{item.label}</span>
+        {item.meta && <span className="block truncate text-xs font-semibold opacity-70">{item.meta}</span>}
+      </span>
+    </NavLink>
+  );
+}
+
 export default function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -72,19 +103,25 @@ export default function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-5 space-y-1.5 overflow-y-auto">
-        {navItems.map(({ to, label, icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              `sidebar-link ${isActive ? 'active' : ''}`
-            }
-          >
-            {icon}
-            {label}
-          </NavLink>
-        ))}
+      <nav className="flex min-h-0 flex-1 flex-col px-3 py-5" aria-label="Student sidebar">
+        <div className="space-y-1.5">
+          <p className="px-4 pb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">Main</p>
+          {mainNavItems.map((item) => (
+            <SidebarLink key={item.to} item={item} />
+          ))}
+        </div>
+
+        <div className="mt-auto space-y-2 pb-3">
+          <p className="px-4 text-[11px] font-bold uppercase tracking-wide text-blue-500">Learning</p>
+          <div className="rounded-lg border border-blue-100 bg-blue-50/70 p-2">
+            {learningNavItems.map((item) => (
+              <SidebarLink key={item.to} item={item} featured />
+            ))}
+          </div>
+          <div className="px-4 text-xs leading-5 text-slate-500">
+            Clear your queue, build a streak, unlock harder decks.
+          </div>
+        </div>
       </nav>
 
       {/* User footer */}

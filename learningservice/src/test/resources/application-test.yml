@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:learningtestdb;DB_CLOSE_DELAY=-1;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+
+management:
+  health:
+    redis:
+      enabled: false
+
+app:
+  jwt:
+    secret: testSecretKeyForTestingPurposesOnlyMustBeLongEnough256Bits!!

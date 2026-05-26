@@ -6,7 +6,7 @@ RUN cd frontend/student && npm ci
 COPY frontend/student/index.html frontend/student/vite.config.js frontend/student/postcss.config.js frontend/student/tailwind.config.js frontend/student/
 COPY frontend/student/public frontend/student/public
 COPY frontend/student/src frontend/student/src
-RUN cd frontend/student && VITE_BASE_PATH=/student VITE_API_BASE_URL=/api npm run build
+RUN cd frontend/student && VITE_BASE_PATH=/student VITE_API_BASE_URL=/api VITE_LEARNING_API_URL=/api npm run build
 
 FROM node:22-alpine AS teacher-build
 WORKDIR /app

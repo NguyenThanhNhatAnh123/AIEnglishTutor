@@ -7,3 +7,8 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ["backend:8080"]
+
+  - job_name: "spring-learningservice"
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["learningservice:8081"]
