@@ -33,6 +33,7 @@ public class LearningService {
     private final StudentDeckEnrollmentRepository enrollmentRepository;
     private final StudentItemStateRepository stateRepository;
     private final FlashcardReviewRepository reviewRepository;
+    private final CachedVocabularyService cachedVocabularyService;
     private final SpacedRepetitionPolicy spacedRepetitionPolicy = new SpacedRepetitionPolicy();
 
     @Transactional(readOnly = true)
@@ -49,6 +50,8 @@ public class LearningService {
         Map<Long, String> enrollments = enrollmentRepository.findEnrollmentDeckIds(studentUserId, deckIds).stream()
                 .collect(Collectors.toMap(EnrollmentDeckId::getDeckId, e -> e.getStatus().name()));
         Instant now = Instant.now();
+        Map<Long, Long> dueCounts = stateRepository.countDueByDeckIds(studentUserId, deckIds, now, StudyStatus.SUSPENDED).stream()
+                .collect(Collectors.toMap(row -> (Long) row[0], row -> ((Number) row[1]).longValue()));
 
         return decks.stream()
                 .map(deck -> DeckResponse.builder()
@@ -61,8 +64,7 @@ public class LearningService {
                         .enrolled(enrollments.containsKey(deck.getId()))
                         .enrollmentStatus(enrollments.get(deck.getId()))
                         .dueCount(enrollments.containsKey(deck.getId())
-                                ? stateRepository.countByStudentUserIdAndItem_Deck_IdAndDueAtLessThanEqualAndStatusNot(
-                                studentUserId, deck.getId(), now, StudyStatus.SUSPENDED)
+                                ? dueCounts.getOrDefault(deck.getId(), 0L)
                                 : 0L)
                         .createdAt(deck.getCreatedAt())
                         .build())
@@ -97,18 +99,18 @@ public class LearningService {
     public List<VocabularyItemResponse> getDeckItems(Long deckId) {
         Long studentUserId = SecurityUtils.getCurrentUserId();
         Deck deck = findVisibleDeck(deckId);
-        List<VocabularyItem> items = vocabularyItemRepository.findByDeck_IdAndActiveTrueOrderByOrderInDeckAscIdAsc(deck.getId());
+        List<VocabularyItemResponse> items = cachedVocabularyService.getActiveItems(deck.getId());
         if (items.isEmpty()) {
             return List.of();
         }
 
         Map<Long, StudentItemState> states = stateRepository
-                .findByStudentUserIdAndItem_IdIn(studentUserId, items.stream().map(VocabularyItem::getId).toList())
+                .findByStudentUserIdAndItem_IdIn(studentUserId, items.stream().map(VocabularyItemResponse::getId).toList())
                 .stream()
                 .collect(Collectors.toMap(s -> s.getItem().getId(), Function.identity()));
 
         return items.stream()
-                .map(item -> toItemResponse(item, states.get(item.getId())))
+                .map(item -> withStudyStatus(item, states.get(item.getId())))
                 .toList();
     }
 
@@ -294,10 +296,10 @@ public class LearningService {
                 .orElseThrow(() -> new BadRequestException("Enroll the deck before reviewing"));
     }
 
-    private VocabularyItemResponse toItemResponse(VocabularyItem item, StudentItemState state) {
+    private VocabularyItemResponse withStudyStatus(VocabularyItemResponse item, StudentItemState state) {
         return VocabularyItemResponse.builder()
                 .id(item.getId())
-                .deckId(item.getDeck().getId())
+                .deckId(item.getDeckId())
                 .word(item.getWord())
                 .phonetic(item.getPhonetic())
                 .partOfSpeech(item.getPartOfSpeech())

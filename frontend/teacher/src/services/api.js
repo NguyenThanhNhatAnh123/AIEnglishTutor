@@ -54,23 +54,11 @@ api.interceptors.response.use(
 
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
-};
-
-export const roleApi = {
-  getAll: () => api.get('/roles'),
-};
-
-export const userApi = {
-  getAll: (params) => api.get('/users', { params }),
-  getById: (id) => api.get(`/users/${id}`),
-  create: (data) => api.post('/users', data),
-  update: (id, data) => api.put(`/users/${id}`, data),
-  delete: (id) => api.delete(`/users/${id}`),
+  changePassword: (data) => api.put('/auth/change-password', data),
 };
 
 export const studentApi = {
   getAll: (params) => api.get('/students', { params }),
-  getById: (id) => api.get(`/students/${id}`),
   create: (data) => api.post('/students', data),
   update: (id, data) => api.put(`/students/${id}`, data),
   delete: (id) => api.delete(`/students/${id}`),
@@ -87,17 +75,16 @@ export const teacherDashboardApi = {
 
 export const classApi = {
   getAll: () => api.get('/classes'),
+  workspace: () => api.get('/classes/workspace'),
   getById: (id) => api.get(`/classes/${id}`),
   create: (data) => api.post('/classes', data),
   update: (id, data) => api.put(`/classes/${id}`, data),
   delete: (id) => api.delete(`/classes/${id}`),
-  getStudents: (id) => api.get(`/classes/${id}/students`),
-  addStudent: (classId, studentId) => api.post(`/classes/${classId}/students/${studentId}`),
-  removeStudent: (classId, studentId) => api.delete(`/classes/${classId}/students/${studentId}`),
 };
 
 export const examApi = {
   getAll: () => api.get('/exams'),
+  workspace: () => api.get('/exams/workspace'),
   getById: (id) => api.get(`/exams/${id}`),
   create: (data) => api.post('/exams', data),
   update: (id, data) => api.put(`/exams/${id}`, data),
@@ -105,12 +92,9 @@ export const examApi = {
   delete: (id) => api.delete(`/exams/${id}`),
 };
 
-/** CRUD sections under an exam (aligned with student exam structure by section) */
+/** Read sections under an exam; create/update happens through the aggregate exam form. */
 export const examSectionApi = {
   list: (examId) => api.get(`/exams/${examId}/sections`),
-  create: (examId, data) => api.post(`/exams/${examId}/sections`, data),
-  update: (examId, sectionId, data) => api.put(`/exams/${examId}/sections/${sectionId}`, data),
-  delete: (examId, sectionId) => api.delete(`/exams/${examId}/sections/${sectionId}`),
 };
 
 export const questionApi = {
@@ -142,26 +126,6 @@ export const aiApi = {
     formData.append('file', file, file.name || 'paper.pdf');
     return api.post('/ai/ocr-paper', formData, { headers: {} });
   },
-  ocrToQuestion: (file, sectionId, points = 1, correctChoiceIndex = 0, questionType = 'MULTIPLE_CHOICE') => {
-    const formData = new FormData();
-    formData.append('file', file, file.name || 'image.png');
-    formData.append('sectionId', String(sectionId));
-    formData.append('points', String(points));
-    formData.append('correctChoiceIndex', String(correctChoiceIndex));
-    formData.append('questionType', String(questionType));
-    return api.post('/ai/ocr-to-question', formData, { headers: {} });
-  },
-  scoreSpeaking: (answerId, audioUrl) =>
-    api.post('/ai/score-speaking', {
-      answerId,
-      audioUrl,
-    }),
-  scoreWriting: (answerId, essayText, customPrompt) =>
-    api.post('/ai/score-writing', {
-      answerId,
-      essayText,
-      customPrompt,
-    }),
   tts: (text) => api.post('/ai/tts', { text }),
 };
 
@@ -189,7 +153,7 @@ export const speakingReviewApi = {
 
 export const submissionApi = {
   getByExamId: (examId) => api.get('/submissions', { params: { examId } }),
-  getById: (id) => api.get(`/submissions/${id}`),
+  workspace: (examId) => api.get('/submissions/workspace', { params: { examId } }),
   getAnswers: (id) => api.get(`/submissions/${id}/answers`),
   getAnswersBatch: (submissionIds) => api.get('/submissions/answers', { params: { submissionId: submissionIds } }),
   delete: (id) => api.delete(`/submissions/${id}`),

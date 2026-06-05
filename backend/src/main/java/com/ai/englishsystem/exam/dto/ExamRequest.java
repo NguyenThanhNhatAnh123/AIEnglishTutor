@@ -1,6 +1,8 @@
 package com.ai.englishsystem.exam.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -19,9 +21,7 @@ public class ExamRequest {
 
     private String description;
 
-    // FIX: teacherId removed from @NotNull — the teacher is now resolved from the JWT
-    // in ExamService. This field is intentionally kept here (but ignored) for backwards
-    // compatibility if older clients still send it — it will simply be ignored.
+    @NotNull(message = "teacherId is required")
     private Integer teacherId;
 
     private Integer durationMinutes;
@@ -34,6 +34,9 @@ public class ExamRequest {
     /** Null = unlimited attempts (except OFFICIAL defaults to 1). */
     private Integer maxAttempts;
 
-    /** Empty = unrestricted; otherwise only students in these classes can take this exam. */
+    /** Required before publishing ACTIVE; only students in these classes can take this exam. */
     private List<Integer> allowedClassIds;
+
+    /** Optional aggregate write payload. Null means keep existing sections on update. */
+    private List<@Valid ExamSectionRequest> sections;
 }

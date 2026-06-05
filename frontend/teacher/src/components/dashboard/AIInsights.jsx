@@ -15,11 +15,11 @@ export default function AIInsights({ insights }) {
         <div>
           <div className="inline-flex items-center gap-2 rounded-md bg-white/80 px-2.5 py-1 text-xs font-bold uppercase tracking-[0.14em] text-indigo-600 ring-1 ring-indigo-100">
             <Sparkles className="h-3.5 w-3.5" />
-            AI Insights
+            Gợi ý AI
           </div>
-          <h2 className="mt-3 text-xl font-bold text-slate-950">Recommended teacher actions</h2>
+          <h2 className="mt-3 text-xl font-bold text-slate-950">Hành động đề xuất cho giáo viên</h2>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            Signals are generated from submissions, scores, completion, and suspicious activity.
+            Tín hiệu được tạo từ bài nộp, điểm số, mức độ hoàn thành và hoạt động bất thường.
           </p>
         </div>
       </div>

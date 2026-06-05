@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Button from '../components/common/Button';
 import { aiApi, examApi, examSectionApi, questionApi, API_ORIGIN } from '../services/api';
@@ -16,6 +16,8 @@ function buildBulkLine(result) {
 }
 
 export default function OcrWorkspace() {
+  const [searchParams] = useSearchParams();
+  const initialExamId = searchParams.get('examId') || '';
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [processing, setProcessing] = useState(false);
@@ -85,8 +87,9 @@ export default function OcrWorkspace() {
       .then((r) => {
         const list = r.data?.data || [];
         setExams(list);
+        const requested = list.find((ex) => String(ex.id) === String(initialExamId) && ex.canManage !== false);
         const manageable = list.find((ex) => ex.canManage !== false);
-        const pick = manageable?.id ?? list[0]?.id;
+        const pick = requested?.id ?? manageable?.id ?? list[0]?.id;
         if (pick != null) setExamId(String(pick));
       })
       .catch((err) => {
@@ -94,7 +97,7 @@ export default function OcrWorkspace() {
         const msg = err?.response?.data?.message || 'Failed to load exams.';
         toast.error(msg);
       });
-  }, [toast]);
+  }, [initialExamId, toast]);
 
   useEffect(() => {
     if (!examId) {

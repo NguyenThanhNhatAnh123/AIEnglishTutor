@@ -59,7 +59,7 @@ public class Exam {
     private List<ExamSection> sections = new ArrayList<>();
 
     /**
-     * Empty = no class restriction (any student can take the exam).
+     * ACTIVE exams must have at least one allowed class.
      */
     @ManyToMany
     @JoinTable(

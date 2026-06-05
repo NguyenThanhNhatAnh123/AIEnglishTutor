@@ -10,8 +10,6 @@ import java.util.List;
 
 public interface ClassRepository extends JpaRepository<ClassEntity, Integer> {
 
-    List<ClassEntity> findAllByOrderByIdDesc();
-
     @Query("""
             SELECT new com.ai.englishsystem.classmodule.dto.ClassSummaryRow(
                 c.id,
@@ -51,13 +49,8 @@ public interface ClassRepository extends JpaRepository<ClassEntity, Integer> {
             """)
     List<ClassSummaryRow> findSummaryRowsByTeacherUserIdOrderByIdDesc(@Param("userId") Integer userId);
 
-    List<ClassEntity> findByNameContainingIgnoreCaseOrderByIdDesc(String name);
-
     @Query("SELECT COUNT(cs) FROM ClassStudent cs WHERE cs.classEntity.id = :classId")
     long countStudentsByClassId(@Param("classId") Integer classId);
-
-    @Query("SELECT c FROM ClassEntity c WHERE c.teacher.user.id = :userId ORDER BY c.id DESC")
-    List<ClassEntity> findByTeacherUserIdOrderByIdDesc(@Param("userId") Integer userId);
 
     long countByTeacher_User_Id(Integer userId);
 }

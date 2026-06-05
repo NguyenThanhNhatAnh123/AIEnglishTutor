@@ -13,6 +13,7 @@ import com.ai.englishsystem.exam.entity.ExamType;
 import com.ai.englishsystem.exam.entity.Question;
 import com.ai.englishsystem.exam.repository.ExamAttemptRepository;
 import com.ai.englishsystem.exam.repository.ExamRepository;
+import com.ai.englishsystem.exam.repository.QuestionRepository;
 import com.ai.englishsystem.classmodule.repository.ClassStudentRepository;
 import com.ai.englishsystem.result.entity.Score;
 import com.ai.englishsystem.result.repository.ScoreRepository;
@@ -57,6 +58,7 @@ public class StudentExamService {
     private final ExamAttemptRepository examAttemptRepository;
     private final SubmissionRepository submissionRepository;
     private final AnswerRepository answerRepository;
+    private final QuestionRepository questionRepository;
     private final StudentRepository studentRepository;
     private final ScoreRepository scoreRepository;
     private final SubmissionSuspiciousEventRepository submissionSuspiciousEventRepository;
@@ -113,8 +115,8 @@ public class StudentExamService {
                 .orElseThrow(() -> new NotFoundException("Exam", examId));
 
         assertExamAvailable(exam);
-        assertReadyForTaking(exam);
-        assertStudentCanAccessExam(student, exam);
+        assertReadyForTaking(exam.getId());
+        assertStudentCanAccessExam(student, exam.getId());
 
         var existing = submissionRepository.findByExamAndStudentAndStatus(exam, student, SubmissionStatus.IN_PROGRESS);
         if (existing.isPresent()) {
@@ -168,8 +170,8 @@ public class StudentExamService {
         Exam exam = examRepository.findById(examId)
                 .orElseThrow(() -> new NotFoundException("Exam", examId));
         assertExamAvailable(exam);
-        assertReadyForTaking(exam);
-        assertStudentCanAccessExam(student, exam);
+        assertReadyForTaking(exam.getId());
+        assertStudentCanAccessExam(student, exam.getId());
         return mapExamForStudent(exam, student);
     }
 
@@ -198,6 +200,7 @@ public class StudentExamService {
         if (!submission.getStudent().getId().equals(student.getId())) {
             throw new ForbiddenException("Cannot submit another student's exam");
         }
+        assertStudentCanAccessExam(student, submission.getExam().getId());
         if (submission.getStatus() != SubmissionStatus.IN_PROGRESS) {
             throw new BadRequestException("Submission is not in progress");
         }
@@ -207,11 +210,13 @@ public class StudentExamService {
         boolean pastDeadline = now.isAfter(deadline);
         Integer clientTimeSpentSeconds = submitRequest != null ? submitRequest.getClientTimeSpentSeconds() : null;
 
-        Submission finalSubmission = submission;
-        Exam exam = examRepository.findById(submission.getExam().getId())
-                .orElseThrow(() -> new NotFoundException("Exam", finalSubmission.getExam().getId()));
+        Exam exam = submission.getExam();
+        if (exam == null) {
+            throw new NotFoundException("Exam not loaded for submission");
+        }
+        List<Question> examQuestions = questionRepository.findScoringQuestionsByExamId(exam.getId());
         List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
-        CompletionStats completion = calculateCompletion(exam, answers);
+        CompletionStats completion = calculateCompletion(examQuestions, answers);
 
         if (!pastDeadline && completion.totalQuestions() > 0
                 && completion.completionRatio() < MIN_REQUIRED_COMPLETION_RATIO) {
@@ -261,7 +266,7 @@ public class StudentExamService {
             examAttemptRepository.save(attempt);
         }
 
-        float[] mc = scoreMcqAndListening(exam, answers);
+        float[] mc = scoreMcqAndListening(examQuestions, answers);
         Float mcScore = mc[1] > 0 ? (mc[0] / mc[1]) * 100f : null;
 
         Float writingScore = null;
@@ -383,19 +388,27 @@ public class StudentExamService {
                 .build();
     }
 
-    private void assertStudentCanAccessExam(Student student, Exam exam) {
-        if (!canStudentAccessExam(student, exam)) {
+    public void assertStudentCanAccessExam(Student student, Integer examId) {
+        if (!canStudentAccessExam(student, examId)) {
             throw new ForbiddenException("You are not assigned to any class allowed for this exam");
         }
     }
 
-    private boolean canStudentAccessExam(Student student, Exam exam) {
-        return canStudentAccessExam(new HashSet<>(classStudentRepository.findClassIdsByStudentId(student.getId())), exam);
+    private boolean canStudentAccessExam(Student student, Integer examId) {
+        List<Integer> allowedClassIds = examRepository.findAllowedClassIdsByExamId(examId);
+        if (allowedClassIds.isEmpty()) {
+            return false;
+        }
+        Set<Integer> studentClassIds = new HashSet<>(classStudentRepository.findClassIdsByStudentId(student.getId()));
+        if (studentClassIds.isEmpty()) {
+            return false;
+        }
+        return allowedClassIds.stream().anyMatch(studentClassIds::contains);
     }
 
     private boolean canStudentAccessExam(Set<Integer> studentClassIds, Exam exam) {
         if (exam.getAllowedClasses() == null || exam.getAllowedClasses().isEmpty()) {
-            return true;
+            return false;
         }
         if (studentClassIds.isEmpty()) {
             return false;
@@ -454,27 +467,14 @@ public class StudentExamService {
         return s != null ? s : List.of();
     }
 
-    private static List<Question> questionsOf(ExamSection sec) {
-        List<Question> q = sec.getQuestions();
-        return q != null ? q : List.of();
+    private boolean isReadyForTaking(Integer examId) {
+        return questionRepository.countByExamId(examId) > 0;
     }
 
-    private boolean isReadyForTaking(Exam exam) {
-        return questionCount(exam) > 0;
-    }
-
-    private void assertReadyForTaking(Exam exam) {
-        if (!isReadyForTaking(exam)) {
+    private void assertReadyForTaking(Integer examId) {
+        if (!isReadyForTaking(examId)) {
             throw new BadRequestException("This exam is not ready yet. Please contact your teacher.");
         }
-    }
-
-    private int questionCount(Exam exam) {
-        int total = 0;
-        for (ExamSection section : sectionsOf(exam)) {
-            total += questionsOf(section).size();
-        }
-        return total;
     }
 
     private long completedAttempts(Exam exam, Student student) {
@@ -538,15 +538,13 @@ public class StudentExamService {
         return null;
     }
 
-    private CompletionStats calculateCompletion(Exam exam, List<Answer> answers) {
+    private CompletionStats calculateCompletion(List<Question> questions, List<Answer> answers) {
         int total = 0;
         int answered = 0;
-        for (ExamSection section : sectionsOf(exam)) {
-            for (Question question : questionsOf(section)) {
-                total++;
-                if (isAnswered(question, findAnswer(answers, question.getId()))) {
-                    answered++;
-                }
+        for (Question question : questions) {
+            total++;
+            if (isAnswered(question, findAnswer(answers, question.getId()))) {
+                answered++;
             }
         }
         int percent = total <= 0 ? 0 : (int) Math.round((answered * 100d) / total);
@@ -635,21 +633,19 @@ public class StudentExamService {
                 .build());
     }
 
-    private float[] scoreMcqAndListening(Exam exam, List<Answer> answers) {
+    private float[] scoreMcqAndListening(List<Question> questions, List<Answer> answers) {
         float earned = 0f;
         float max = 0f;
-        for (ExamSection sec : sectionsOf(exam)) {
-            for (Question q : questionsOf(sec)) {
-                String type = normalizeType(q.getQuestionType());
-                if (!isMcqOrListening(type)) {
-                    continue;
-                }
-                int pts = q.getPoints() != null && q.getPoints() > 0 ? q.getPoints() : 1;
-                max += pts;
-                Answer a = findAnswer(answers, q.getId());
-                if (a != null && a.getSelectedOptionId() != null && isCorrectOption(q, a.getSelectedOptionId())) {
-                    earned += pts;
-                }
+        for (Question q : questions) {
+            String type = normalizeType(q.getQuestionType());
+            if (!isMcqOrListening(type)) {
+                continue;
+            }
+            int pts = q.getPoints() != null && q.getPoints() > 0 ? q.getPoints() : 1;
+            max += pts;
+            Answer a = findAnswer(answers, q.getId());
+            if (a != null && a.getSelectedOptionId() != null && isCorrectOption(q, a.getSelectedOptionId())) {
+                earned += pts;
             }
         }
         return new float[]{earned, max};

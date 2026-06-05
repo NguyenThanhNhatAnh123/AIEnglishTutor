@@ -34,7 +34,7 @@ public class TeacherController {
     }
 
     @PostMapping
-    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('ADMIN')")
+    @org.springframework.security.access.prepost.PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ApiResponse<TeacherResponse>> create(@Valid @RequestBody TeacherRequest request) {
         TeacherResponse response = teacherService.create(request);
         return ResponseEntity.ok(ApiResponse.success("Teacher created", response));

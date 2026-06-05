@@ -3,6 +3,7 @@ package com.ai.englishsystem.classmodule.service;
 import com.ai.englishsystem.classmodule.dto.ClassRequest;
 import com.ai.englishsystem.classmodule.dto.ClassResponse;
 import com.ai.englishsystem.classmodule.dto.ClassStudentResponse;
+import com.ai.englishsystem.classmodule.dto.ClassWorkspaceResponse;
 import com.ai.englishsystem.classmodule.entity.ClassEntity;
 import com.ai.englishsystem.classmodule.entity.ClassStudent;
 import com.ai.englishsystem.classmodule.repository.ClassRepository;
@@ -12,14 +13,19 @@ import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
 import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.student.entity.Student;
+import com.ai.englishsystem.student.dto.StudentResponse;
 import com.ai.englishsystem.student.repository.StudentRepository;
 import com.ai.englishsystem.teacher.entity.Teacher;
+import com.ai.englishsystem.teacher.dto.TeacherResponse;
 import com.ai.englishsystem.teacher.repository.TeacherRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -31,7 +37,6 @@ public class ClassService {
     private final TeacherRepository teacherRepository;
     private final StudentRepository studentRepository;
 
-    // ─── LIST ───────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public List<ClassResponse> findAll() {
@@ -48,7 +53,6 @@ public class ClassService {
                 .collect(Collectors.toList());
     }
 
-    // ─── DETAIL ─────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public ClassResponse findById(Integer id) {
@@ -64,11 +68,11 @@ public class ClassService {
         return buildDetailResponse(cls, studentResponses);
     }
 
-    // ─── CREATE ─────────────────────────────────────────────────────────────
 
     @Transactional
     public ClassResponse create(ClassRequest request) {
         Teacher teacher = resolveTeacherForWrite(request.getTeacherId());
+        requireInitialStudents(request.getStudentIds());
 
         ClassEntity entity = ClassEntity.builder()
                 .name(request.getName().trim())
@@ -77,10 +81,31 @@ public class ClassService {
                 .build();
 
         entity = classRepository.save(entity);
-        return toSummaryResponse(entity);
+        syncStudents(entity, request.getStudentIds());
+        return request.getStudentIds() == null ? toSummaryResponse(entity) : findById(entity.getId());
     }
 
-    // ─── UPDATE ─────────────────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public ClassWorkspaceResponse workspace() {
+        List<TeacherResponse> teachers = SecurityUtils.hasRole("ADMIN")
+                ? teacherRepository.findAll().stream().map(this::toTeacherOption).toList()
+                : List.of(toTeacherOption(resolveCurrentTeacher()));
+
+        return ClassWorkspaceResponse.builder()
+                .classes(findAll())
+                .students(studentRepository.findAllActiveStudents().stream()
+                        .map(this::toStudentOption)
+                        .toList())
+                .teachers(teachers)
+                .build();
+    }
+
+    private void requireInitialStudents(List<Integer> studentIds) {
+        if (studentIds == null || studentIds.stream().filter(id -> id != null).findAny().isEmpty()) {
+            throw new BadRequestException("Select at least one student for this class");
+        }
+    }
+
 
     @Transactional
     public ClassResponse update(Integer id, ClassRequest request) {
@@ -95,10 +120,10 @@ public class ClassService {
         entity.setTeacher(teacher);
 
         entity = classRepository.save(entity);
-        return toSummaryResponse(entity);
+        syncStudents(entity, request.getStudentIds());
+        return request.getStudentIds() == null ? toSummaryResponse(entity) : findById(entity.getId());
     }
 
-    // ─── DELETE ─────────────────────────────────────────────────────────────
 
     @Transactional
     public void delete(Integer id) {
@@ -106,66 +131,53 @@ public class ClassService {
                 .orElseThrow(() -> new NotFoundException("Class", id));
         assertTeacherOwnsClass(entity);
 
-        // Remove all class_students first to avoid FK violation
+        // Remove all class_students first to avoid FK violation.
         classStudentRepository.deleteByClassId(id);
         classRepository.delete(entity);
     }
 
-    // ─── ADD STUDENT ────────────────────────────────────────────────────────
+    private void syncStudents(ClassEntity cls, List<Integer> requestedStudentIds) {
+        if (requestedStudentIds == null) {
+            return;
+        }
+        Set<Integer> desiredIds = requestedStudentIds.stream()
+                .filter(id -> id != null)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Integer, ClassStudent> existingByStudentId = classStudentRepository.findByClassIdWithStudentUser(cls.getId())
+                .stream()
+                .collect(Collectors.toMap(enrollment -> enrollment.getStudent().getId(), enrollment -> enrollment));
 
-    @Transactional
-    public ClassStudentResponse addStudent(Integer classId, Integer studentId) {
-        ClassEntity cls = classRepository.findById(classId)
-                .orElseThrow(() -> new NotFoundException("Class", classId));
-        assertTeacherOwnsClass(cls);
-
-        Student student = studentRepository.findById(studentId)
-                .orElseThrow(() -> new NotFoundException("Student", studentId));
-
-        if (classStudentRepository.existsByClassEntityAndStudent(cls, student)) {
-            throw new BadRequestException("Student is already enrolled in this class");
+        for (ClassStudent enrollment : existingByStudentId.values()) {
+            if (!desiredIds.contains(enrollment.getStudent().getId())) {
+                classStudentRepository.delete(enrollment);
+            }
         }
 
-        ClassStudent cs = ClassStudent.builder()
-                .classEntity(cls)
-                .student(student)
-                .build();
+        Set<Integer> existingIds = existingByStudentId.keySet();
+        List<Integer> newIds = desiredIds.stream()
+                .filter(id -> !existingIds.contains(id))
+                .toList();
+        if (newIds.isEmpty()) {
+            return;
+        }
 
-        cs = classStudentRepository.save(cs);
-        return toStudentResponse(cs);
+        List<Student> students = studentRepository.findAllById(newIds);
+        if (students.size() != newIds.size()) {
+            throw new NotFoundException("One or more students were not found");
+        }
+        boolean hasInactiveStudent = students.stream()
+                .anyMatch(student -> student.getUser() == null
+                        || !"ACTIVE".equalsIgnoreCase(student.getUser().getStatus()));
+        if (hasInactiveStudent) {
+            throw new BadRequestException("Only active students can be assigned to a class");
+        }
+        for (Student student : students) {
+            classStudentRepository.save(ClassStudent.builder()
+                    .classEntity(cls)
+                    .student(student)
+                    .build());
+        }
     }
-
-    // ─── REMOVE STUDENT ─────────────────────────────────────────────────────
-
-    @Transactional
-    public void removeStudent(Integer classId, Integer studentId) {
-        ClassEntity cls = classRepository.findById(classId)
-                .orElseThrow(() -> new NotFoundException("Class", classId));
-        assertTeacherOwnsClass(cls);
-
-        Student student = studentRepository.findById(studentId)
-                .orElseThrow(() -> new NotFoundException("Student", studentId));
-
-        ClassStudent cs = classStudentRepository.findByClassEntityAndStudent(cls, student)
-                .orElseThrow(() -> new NotFoundException("Enrollment for student " + studentId + " in class", classId));
-
-        classStudentRepository.delete(cs);
-    }
-
-    // ─── GET STUDENTS OF CLASS ──────────────────────────────────────────────
-
-    @Transactional(readOnly = true)
-    public List<ClassStudentResponse> getStudents(Integer classId) {
-        ClassEntity cls = classRepository.findById(classId)
-                .orElseThrow(() -> new NotFoundException("Class", classId));
-        assertTeacherOwnsClass(cls);
-        return classStudentRepository.findByClassIdWithStudentUser(classId)
-                .stream()
-                .map(this::toStudentResponse)
-                .collect(Collectors.toList());
-    }
-
-    // ─── ACCESS CONTROL ─────────────────────────────────────────────────────
 
     private Teacher resolveTeacherForWrite(Integer requestedTeacherId) {
         if (SecurityUtils.hasRole("ADMIN")) {
@@ -174,6 +186,9 @@ public class ClassService {
         }
         if (SecurityUtils.hasRole("TEACHER")) {
             Teacher current = resolveCurrentTeacher();
+            if (requestedTeacherId == null) {
+                return current;
+            }
             if (!current.getId().equals(requestedTeacherId)) {
                 throw new ForbiddenException("Teachers can only manage their own classes");
             }
@@ -206,7 +221,6 @@ public class ClassService {
         throw new ForbiddenException("Access denied");
     }
 
-    // ─── MAPPERS ────────────────────────────────────────────────────────────
 
     private ClassResponse toSummaryResponse(ClassEntity entity) {
         long totalStudents = classRepository.countStudentsByClassId(entity.getId());
@@ -243,7 +257,36 @@ public class ClassService {
                 .fullName(user.getFullName())
                 .username(user.getUsername())
                 .email(user.getEmail())
+                .status(user.getStatus())
                 .joinedAt(cs.getJoinedAt())
+                .build();
+    }
+
+    private StudentResponse toStudentOption(Student student) {
+        var user = student.getUser();
+        return StudentResponse.builder()
+                .id(student.getId())
+                .userId(user != null ? user.getId() : null)
+                .username(user != null ? user.getUsername() : null)
+                .studentCode(student.getStudentCode())
+                .fullName(user != null ? user.getFullName() : null)
+                .email(user != null ? user.getEmail() : null)
+                .status(user != null ? user.getStatus() : null)
+                .dateOfBirth(student.getDateOfBirth())
+                .createdAt(student.getCreatedAt())
+                .build();
+    }
+
+    private TeacherResponse toTeacherOption(Teacher teacher) {
+        var user = teacher.getUser();
+        return TeacherResponse.builder()
+                .id(teacher.getId())
+                .userId(user != null ? user.getId() : null)
+                .teacherCode(teacher.getTeacherCode())
+                .fullName(user != null ? user.getFullName() : null)
+                .email(user != null ? user.getEmail() : null)
+                .department(teacher.getDepartment())
+                .createdAt(teacher.getCreatedAt())
                 .build();
     }
 }

@@ -14,15 +14,15 @@ function PerformanceTooltip({ active, payload, label }) {
   return (
     <div className="max-w-64 rounded-lg border border-white/80 bg-white/95 px-3 py-2 text-sm shadow-panel">
       <p className="truncate font-semibold text-slate-900">{label}</p>
-      <p className="mt-1 text-slate-500">Average score: <span className="font-bold text-indigo-600">{item.avgScore.toFixed(1)}</span></p>
-      <p className="text-slate-500">{item.attempts} attempts, {item.suspiciousAttempts} warnings</p>
+      <p className="mt-1 text-slate-500">Điểm trung bình: <span className="font-bold text-indigo-600">{item.avgScore.toFixed(1)}</span></p>
+      <p className="text-slate-500">{item.attempts} lần làm, {item.suspiciousAttempts} cảnh báo</p>
     </div>
   );
 }
 
 export default function ExamPerformanceChart({ data }) {
   if (!data.length) {
-    return <div className="flex h-80 items-center justify-center text-sm text-slate-500">No graded exam performance yet.</div>;
+    return <div className="flex h-80 items-center justify-center text-sm text-slate-500">Chưa có hiệu suất bài thi đã chấm.</div>;
   }
 
   return (

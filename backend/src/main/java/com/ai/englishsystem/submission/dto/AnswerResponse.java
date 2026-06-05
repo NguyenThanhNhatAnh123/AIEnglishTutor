@@ -22,6 +22,8 @@ public class AnswerResponse {
     /** Helps teachers route playback (e.g. SPEAKING). */
     private String questionType;
 
+    private String answerType;
+
     private String answerText;
     private Integer selectedOptionId;
     private String selectedOptionText;

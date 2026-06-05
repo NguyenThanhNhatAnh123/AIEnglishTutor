@@ -6,11 +6,13 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  FileScan,
   Gauge,
   GraduationCap,
   LayoutDashboard,
   School,
   Settings,
+  UserCog,
   UsersRound,
   X,
 } from 'lucide-react';
@@ -20,14 +22,17 @@ const navItems = [
   { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/exams', label: 'Exams', icon: ClipboardList },
   { to: '/classes', label: 'Classes', icon: School },
+  { to: '/teachers', label: 'Teachers', icon: UserCog, adminOnly: true },
   { to: '/students', label: 'Students', icon: UsersRound },
   { to: '/analytics', label: 'Analytics', icon: BarChart3 },
   { to: '/questions', label: 'Question Bank', icon: BookOpenCheck },
+  { to: '/ocr', label: 'OCR Workspace', icon: FileScan },
   { to: '/results', label: 'Results', icon: Gauge },
   { to: '/profile', label: 'Settings', icon: Settings },
 ];
 
 function SidebarContent({ collapsed, onToggleCollapse, onClose, user }) {
+  const visibleItems = navItems.filter((item) => !item.adminOnly || user?.role === 'ADMIN');
   return (
     <>
       <div className="flex h-16 items-center justify-between gap-3 border-b border-slate-200 px-4">
@@ -53,7 +58,7 @@ function SidebarContent({ collapsed, onToggleCollapse, onClose, user }) {
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {navItems.map(({ to, label, icon }) => (
+        {visibleItems.map(({ to, label, icon }) => (
           <NavLink
             key={to}
             to={to}

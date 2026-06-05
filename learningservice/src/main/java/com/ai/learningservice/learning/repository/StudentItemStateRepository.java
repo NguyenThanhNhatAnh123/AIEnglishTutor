@@ -62,5 +62,21 @@ public interface StudentItemStateRepository extends JpaRepository<StudentItemSta
             Instant now,
             StudyStatus status);
 
+    @Query("""
+            SELECT i.deck.id, COUNT(s.id)
+            FROM StudentItemState s
+            JOIN s.item i
+            WHERE s.studentUserId = :studentUserId
+              AND i.deck.id IN :deckIds
+              AND s.dueAt <= :now
+              AND s.status <> :status
+            GROUP BY i.deck.id
+            """)
+    List<Object[]> countDueByDeckIds(
+            @Param("studentUserId") Long studentUserId,
+            @Param("deckIds") Collection<Long> deckIds,
+            @Param("now") Instant now,
+            @Param("status") StudyStatus status);
+
     long countByStudentUserIdAndItem_Deck_Id(Long studentUserId, Long deckId);
 }

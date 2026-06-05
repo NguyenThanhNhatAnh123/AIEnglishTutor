@@ -4,6 +4,7 @@ import com.ai.englishsystem.common.dto.ApiResponse;
 import com.ai.englishsystem.exam.dto.ExamResponse;
 import com.ai.englishsystem.exam.dto.student.StudentExamDetailResponse;
 import com.ai.englishsystem.exam.service.StudentExamService;
+import com.ai.englishsystem.submission.dto.AnswerBatchRequest;
 import com.ai.englishsystem.submission.dto.AnswerRequest;
 import com.ai.englishsystem.submission.dto.AnswerResponse;
 import com.ai.englishsystem.submission.dto.StudentSubmitExamResponse;
@@ -27,7 +28,7 @@ public class StudentExamController {
     private final StudentExamService studentExamService;
     private final AnswerService answerService;
 
-    /** List only ACTIVE exams for students — never exposes DRAFT/CLOSED */
+    /** List only ACTIVE exams for students; never exposes DRAFT/CLOSED. */
     @GetMapping("/exams")
     public ResponseEntity<ApiResponse<List<ExamResponse>>> getActiveExams() {
         List<ExamResponse> list = studentExamService.getActiveExams();
@@ -52,7 +53,14 @@ public class StudentExamController {
         return ResponseEntity.ok(ApiResponse.success("Answer saved", body));
     }
 
-    /** Load saved answers for resume — student can only see their own */
+    @PostMapping("/answers/batch")
+    public ResponseEntity<ApiResponse<List<AnswerResponse>>> saveAnswersBatch(
+            @Valid @RequestBody AnswerBatchRequest request) {
+        List<AnswerResponse> body = answerService.saveOrUpdateBatch(request.getAnswers());
+        return ResponseEntity.ok(ApiResponse.success("Answers saved", body));
+    }
+
+    /** Load saved answers for resume; students can only see their own. */
     @GetMapping("/submissions/{submissionId}/answers")
     public ResponseEntity<ApiResponse<List<AnswerResponse>>> getAnswers(@PathVariable Integer submissionId) {
         List<AnswerResponse> list = answerService.getAnswersForSubmission(submissionId);

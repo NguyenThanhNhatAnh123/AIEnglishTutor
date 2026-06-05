@@ -4,6 +4,9 @@ Thumbs.db
 .vscode/
 .idea/
 .playwright-mcp/
+.codex-smoke-tmp/
+.tmp/
+tmp/
 
 # Python cache
 **/__pycache__/
@@ -21,6 +24,7 @@ backend/uploads/
 
 # Frontend build artifacts
 frontend/**/dist/
+target/
 
 # Logs
 *.log

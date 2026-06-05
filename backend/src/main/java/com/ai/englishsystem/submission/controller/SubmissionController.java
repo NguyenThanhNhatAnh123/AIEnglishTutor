@@ -2,13 +2,11 @@ package com.ai.englishsystem.submission.controller;
 
 import com.ai.englishsystem.common.dto.ApiResponse;
 import com.ai.englishsystem.submission.dto.AnswerResponse;
-import com.ai.englishsystem.submission.dto.StartSubmissionRequest;
 import com.ai.englishsystem.submission.dto.SubmissionListResponse;
 import com.ai.englishsystem.submission.dto.SubmissionResponse;
-import com.ai.englishsystem.submission.dto.SubmitSubmissionRequest;
+import com.ai.englishsystem.submission.dto.SubmissionWorkspaceResponse;
 import com.ai.englishsystem.submission.service.AnswerService;
 import com.ai.englishsystem.submission.service.SubmissionService;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
@@ -33,6 +31,13 @@ public class SubmissionController {
     public ResponseEntity<ApiResponse<List<SubmissionListResponse>>> listByExam(@RequestParam Integer examId) {
         List<SubmissionListResponse> list = submissionService.listByExam(examId);
         return ResponseEntity.ok(ApiResponse.success(list));
+    }
+
+    /** Teacher/Admin: submissions plus answer map for the review workspace. */
+    @GetMapping("/workspace")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<SubmissionWorkspaceResponse>> workspace(@RequestParam Integer examId) {
+        return ResponseEntity.ok(ApiResponse.success(submissionService.workspaceByExam(examId)));
     }
 
     /** Teacher/Admin/Student: get submission detail (ownership enforced in service). */
@@ -90,29 +95,4 @@ public class SubmissionController {
         return ResponseEntity.ok(ApiResponse.success(list));
     }
 
-    // POST /api/submissions/start and POST /api/submissions/submit are deprecated.
-    // Students must use /api/student/submissions/{id}/submit (StudentExamController).
-    // Kept only for backward compatibility; will be removed in a future release.
-
-    /**
-     * @deprecated Use POST /api/student/submissions/{submissionId}/submit instead.
-     */
-    @Deprecated
-    @PostMapping("/start")
-    @PreAuthorize("hasRole('STUDENT')")
-    public ResponseEntity<ApiResponse<SubmissionResponse>> start(@Valid @RequestBody StartSubmissionRequest request) {
-        SubmissionResponse response = submissionService.start(request);
-        return ResponseEntity.ok(ApiResponse.success("Exam started", response));
-    }
-
-    /**
-     * @deprecated Use POST /api/student/submissions/{submissionId}/submit instead.
-     */
-    @Deprecated
-    @PostMapping("/submit")
-    @PreAuthorize("hasRole('STUDENT')")
-    public ResponseEntity<ApiResponse<SubmissionResponse>> submit(@Valid @RequestBody SubmitSubmissionRequest request) {
-        SubmissionResponse response = submissionService.submit(request);
-        return ResponseEntity.ok(ApiResponse.success("Exam submitted", response));
-    }
 }

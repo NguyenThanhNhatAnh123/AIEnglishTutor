@@ -17,5 +17,6 @@ public class ClassStudentResponse {
     private String fullName;
     private String username;
     private String email;
+    private String status;
     private LocalDateTime joinedAt;
 }

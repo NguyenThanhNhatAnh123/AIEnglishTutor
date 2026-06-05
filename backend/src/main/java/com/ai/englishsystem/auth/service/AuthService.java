@@ -1,20 +1,18 @@
 package com.ai.englishsystem.auth.service;
 
 import com.ai.englishsystem.auth.dto.AuthResponse;
+import com.ai.englishsystem.auth.dto.ChangePasswordRequest;
 import com.ai.englishsystem.auth.dto.LoginRequest;
 import com.ai.englishsystem.auth.dto.RegisterRequest;
-import com.ai.englishsystem.auth.entity.Role;
-import com.ai.englishsystem.auth.repository.RoleRepository;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.UnauthorizedException;
+import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.config.JwtService;
-import com.ai.englishsystem.student.entity.Student;
-import com.ai.englishsystem.student.repository.StudentRepository;
+import com.ai.englishsystem.teacher.repository.TeacherRepository;
 import com.ai.englishsystem.user.entity.User;
 import com.ai.englishsystem.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,8 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AuthService {
 
     private final UserRepository userRepository;
-    private final RoleRepository roleRepository;
-    private final StudentRepository studentRepository;
+    private final TeacherRepository teacherRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
 
@@ -49,7 +46,7 @@ public class AuthService {
             }
         }
 
-        if (!"ACTIVE".equals(user.getStatus())) {
+        if (!"ACTIVE".equalsIgnoreCase(user.getStatus())) {
             throw new ForbiddenException("Account is not active");
         }
 
@@ -63,70 +60,41 @@ public class AuthService {
                 .email(user.getEmail())
                 .fullName(user.getFullName())
                 .role(user.getRole().getName())
+                .teacherId(resolveTeacherId(user))
                 .build();
     }
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new BadRequestException("Email already registered");
-        }
-        if (userRepository.existsByUsername(request.getUsername())) {
-            throw new BadRequestException("Username already taken");
-        }
-
-        Role role = resolveStudentRegistrationRole(request.getRoleId());
-
-        User user = User.builder()
-                .username(request.getUsername())
-                .email(request.getEmail())
-                .password(passwordEncoder.encode(request.getPassword()))
-                .fullName(request.getFullName())
-                .role(role)
-                .status("ACTIVE")
-                .build();
-
-        try {
-            user = userRepository.save(user);
-        } catch (DataIntegrityViolationException ex) {
-            throw new BadRequestException("Email or username already exists");
-        }
-
-        String studentCode = "STU-" + user.getId() + "-" + System.currentTimeMillis();
-        try {
-            studentRepository.save(Student.builder()
-                    .user(user)
-                    .studentCode(studentCode)
-                    .build());
-        } catch (DataIntegrityViolationException ex) {
-            throw new BadRequestException("Student profile creation failed due to duplicated data");
-        }
-
-        String token = jwtService.generateToken(user);
-
-        // FIX: use .accessToken() instead of .token()
-        return AuthResponse.builder()
-                .accessToken(token)
-                .userId(user.getId())
-                .username(user.getUsername())
-                .email(user.getEmail())
-                .fullName(user.getFullName())
-                .role(user.getRole().getName())
-                .build();
+        throw new BadRequestException("Student self-registration is disabled. Please contact your teacher.");
     }
 
-    private Role resolveStudentRegistrationRole(Integer requestedRoleId) {
-        Role studentRole = roleRepository.findByName("STUDENT")
-                .orElseThrow(() -> new BadRequestException("Student role not found"));
-
-        if (requestedRoleId == null) {
-            return studentRole;
+    @Transactional
+    public void changePassword(ChangePasswordRequest request) {
+        if (!request.getNewPassword().equals(request.getConfirmPassword())) {
+            throw new BadRequestException("New password confirmation does not match");
+        }
+        if (request.getCurrentPassword().equals(request.getNewPassword())) {
+            throw new BadRequestException("New password must be different from current password");
         }
 
-        if (!studentRole.getId().equals(requestedRoleId)) {
-            throw new BadRequestException("Public registration can only create student accounts");
+        Integer userId = SecurityUtils.getCurrentUserId();
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UnauthorizedException("User not found"));
+        if (!"ACTIVE".equalsIgnoreCase(user.getStatus())) {
+            throw new ForbiddenException("Account is not active");
         }
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new UnauthorizedException("Current password is incorrect");
+        }
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+    }
 
-        return studentRole;
+    private Integer resolveTeacherId(User user) {
+        if (user == null || user.getRole() == null || !"TEACHER".equalsIgnoreCase(user.getRole().getName())) {
+            return null;
+        }
+        return teacherRepository.findIdByUserId(user.getId()).orElse(null);
     }
 }

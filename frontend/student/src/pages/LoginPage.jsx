@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { authApi } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -132,12 +132,6 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-slate-500">
-            Don&apos;t have an account?{' '}
-            <Link to="/register" className="font-medium text-blue-600 hover:underline">
-              Register
-            </Link>
-          </p>
           <p className="mt-3 text-center text-sm text-slate-500">
             Teacher?{' '}
             <a

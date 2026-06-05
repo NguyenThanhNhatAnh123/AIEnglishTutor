@@ -1,7 +1,6 @@
 services:
   mysql:
     image: mysql:8.0
-    profiles: ["docker-db"]
     restart: unless-stopped
     environment:
       MYSQL_DATABASE: ${APP_DB_NAME:-ai_english_exam}
@@ -32,8 +31,9 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      APP_DB_URL: ${APP_DB_URL:-jdbc:mysql://host.docker.internal:${APP_DB_PORT:-3306}/${APP_DB_NAME:-ai_english_exam}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+      APP_DB_URL: ${APP_DB_URL:-jdbc:mysql://mysql:3306/${APP_DB_NAME:-ai_english_exam}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
       APP_DB_USERNAME: ${APP_DB_USERNAME:-root}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-root_password}
       SPRING_PROFILES_ACTIVE: prod
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:8088,http://127.0.0.1:8088,http://localhost,http://127.0.0.1,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174}
       APP_FLYWAY_ENABLED: "true"
@@ -61,6 +61,8 @@ services:
       APP_AI_MAX_CONCURRENT_REQUESTS: "8"
       APP_REDIS_TIMEOUT: "1s"
     depends_on:
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
       aiservice:
@@ -114,13 +116,15 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      LEARNING_DB_URL: ${LEARNING_DB_URL:-jdbc:mysql://host.docker.internal:${APP_DB_PORT:-3306}/${LEARNING_DB_NAME:-ai_english_learning}?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+      LEARNING_DB_URL: ${LEARNING_DB_URL:-jdbc:mysql://mysql:3306/${LEARNING_DB_NAME:-ai_english_learning}?createDatabaseIfNotExist=true&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
       LEARNING_DB_USERNAME: ${LEARNING_DB_USERNAME:-root}
+      LEARNING_DB_PASSWORD: ${LEARNING_DB_PASSWORD:-root_password}
       LEARNING_SERVER_PORT: "8081"
       LEARNING_CORS_ALLOWED_ORIGINS: ${LEARNING_CORS_ALLOWED_ORIGINS:-http://localhost:8088,http://127.0.0.1:8088,http://localhost,http://127.0.0.1,http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174}
       LEARNING_FLYWAY_ENABLED: "true"
       LEARNING_JPA_DDL_AUTO: validate
       LEARNING_CACHE_TYPE: redis
+      LEARNING_CACHE_VOCABULARY_TTL_SECONDS: "1800"
       LEARNING_REDIS_HOST: redis
       LEARNING_REDIS_PORT: "6379"
       LEARNING_REDIS_TIMEOUT: "1s"
@@ -136,6 +140,8 @@ services:
       LEARNING_TOMCAT_ACCEPT: "120"
       LEARNING_TOMCAT_MAX_CONN: "300"
     depends_on:
+      mysql:
+        condition: service_healthy
       redis:
         condition: service_healthy
     ports:

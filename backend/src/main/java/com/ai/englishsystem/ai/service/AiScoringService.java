@@ -109,15 +109,11 @@ public class AiScoringService {
         return sharedHttpClient;
     }
 
-    public AiScoreResponse scoreWriting(WritingScoreRequest request) {
-        return scoreWriting(request, false);
-    }
-
     public AiScoreResponse scoreWriting(WritingScoreRequest request, boolean forceRescore) {
         return scoreWriting(request, forceRescore, null);
     }
 
-    public AiScoreResponse scoreWriting(WritingScoreRequest request, boolean forceRescore, Instant deadlineAt) {
+    private AiScoreResponse scoreWriting(WritingScoreRequest request, boolean forceRescore, Instant deadlineAt) {
         Answer answer = answerRepository.findWithSubmissionGraphById(request.getAnswerId())
                 .orElseThrow(() -> new NotFoundException("Answer", request.getAnswerId()));
         assertCanScoreAnswer(answer);
@@ -175,15 +171,11 @@ public class AiScoringService {
         return toAiScoreResponse(aiResult);
     }
 
-    public AiScoreResponse scoreSpeaking(SpeakingScoreRequest request) {
-        return scoreSpeaking(request, false);
-    }
-
     public AiScoreResponse scoreSpeaking(SpeakingScoreRequest request, boolean forceRescore) {
         return scoreSpeaking(request, forceRescore, null);
     }
 
-    public AiScoreResponse scoreSpeaking(SpeakingScoreRequest request, boolean forceRescore, Instant deadlineAt) {
+    private AiScoreResponse scoreSpeaking(SpeakingScoreRequest request, boolean forceRescore, Instant deadlineAt) {
         Answer answer = answerRepository.findWithSubmissionGraphById(request.getAnswerId())
                 .orElseThrow(() -> new NotFoundException("Answer", request.getAnswerId()));
         assertCanScoreAnswer(answer);
@@ -246,7 +238,7 @@ public class AiScoringService {
         return transcribeSpeakingAudio(audioPath, language, newDeadline());
     }
 
-    public String transcribeSpeakingAudio(Path audioPath, String language, Instant deadlineAt) {
+    private String transcribeSpeakingAudio(Path audioPath, String language, Instant deadlineAt) {
         if (audioPath == null || !Files.exists(audioPath)) {
             throw new BadRequestException("Speaking audio file not found for transcription");
         }
@@ -387,14 +379,6 @@ public class AiScoringService {
             Integer ownerUserId = answer.getSubmission().getExam().getTeacher().getUser().getId();
             if (!currentUserId.equals(ownerUserId)) {
                 throw new ForbiddenException("Cannot score answers for another teacher's exam");
-            }
-            return;
-        }
-
-        if (SecurityUtils.hasRole("STUDENT")) {
-            Integer studentUserId = answer.getSubmission().getStudent().getUser().getId();
-            if (!currentUserId.equals(studentUserId)) {
-                throw new ForbiddenException("Cannot score another student's answer");
             }
             return;
         }

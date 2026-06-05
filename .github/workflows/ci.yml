@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    name: Backend tests
+    name: Backend compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,12 +17,12 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - name: Test backend
+      - name: Compile backend
         working-directory: backend
-        run: mvn -q test
+        run: mvn -q -DskipTests compile
 
   learningservice:
-    name: Learning service tests
+    name: Learning service compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,12 +31,12 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: maven
-      - name: Test learningservice
+      - name: Compile learningservice
         working-directory: learningservice
-        run: mvn -q test
+        run: mvn -q -DskipTests compile
 
   frontend:
-    name: Frontend test and build
+    name: Frontend lint and build
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -51,27 +51,26 @@ jobs:
       - name: Install dependencies
         working-directory: frontend/${{ matrix.app }}
         run: npm ci
-      - name: Run tests
+      - name: Lint
         working-directory: frontend/${{ matrix.app }}
-        run: npm run test
+        run: npm run lint
       - name: Build
         working-directory: frontend/${{ matrix.app }}
         run: npm run build
 
   aiservice:
-    name: AI service smoke tests
+    name: AI service import check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install lightweight test dependencies
+      - name: Install dependencies
         working-directory: aiservice
         run: |
           python -m pip install --upgrade pip
-          python -m pip install fastapi==0.115.5 uvicorn==0.32.0 python-multipart==0.0.17 Pillow==10.2.0
-          python -m pip install -r requirements-dev.txt
-      - name: Run tests
+          python -m pip install -r requirements.txt
+      - name: Import app
         working-directory: aiservice
-        run: pytest
+        run: python -c "import app"

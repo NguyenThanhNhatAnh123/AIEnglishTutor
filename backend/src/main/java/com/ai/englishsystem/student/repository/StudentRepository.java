@@ -33,31 +33,31 @@ public interface StudentRepository extends JpaRepository<Student, Integer> {
 
     @EntityGraph(attributePaths = {"user"})
     @Query("""
-            SELECT DISTINCT s FROM Student s
-            JOIN ClassStudent cs ON cs.student = s
-            JOIN cs.classEntity c
-            JOIN c.teacher t
-            WHERE t.user.id = :teacherUserId
+            SELECT s FROM Student s
+            JOIN s.user u
+            JOIN u.role r
+            WHERE UPPER(u.status) = 'ACTIVE'
+              AND UPPER(r.name) = 'STUDENT'
             ORDER BY s.id DESC
             """)
-    List<Student> findAllByTeacherUserId(@Param("teacherUserId") Integer teacherUserId);
+    List<Student> findAllActiveStudents();
 
     @EntityGraph(attributePaths = {"user"})
     @Query(
             value = """
-                    SELECT DISTINCT s FROM Student s
-                    JOIN ClassStudent cs ON cs.student = s
-                    JOIN cs.classEntity c
-                    JOIN c.teacher t
-                    WHERE t.user.id = :teacherUserId
+                    SELECT s FROM Student s
+                    JOIN s.user u
+                    JOIN u.role r
+                    WHERE UPPER(u.status) = 'ACTIVE'
+                      AND UPPER(r.name) = 'STUDENT'
                     """,
             countQuery = """
-                    SELECT COUNT(DISTINCT s.id) FROM Student s
-                    JOIN ClassStudent cs ON cs.student = s
-                    JOIN cs.classEntity c
-                    JOIN c.teacher t
-                    WHERE t.user.id = :teacherUserId
+                    SELECT COUNT(s.id) FROM Student s
+                    JOIN s.user u
+                    JOIN u.role r
+                    WHERE UPPER(u.status) = 'ACTIVE'
+                      AND UPPER(r.name) = 'STUDENT'
                     """
     )
-    Page<Student> findAllByTeacherUserId(@Param("teacherUserId") Integer teacherUserId, Pageable pageable);
+    Page<Student> findAllActiveStudents(Pageable pageable);
 }

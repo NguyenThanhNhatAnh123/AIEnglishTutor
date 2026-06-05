@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import { FileScan, ListPlus } from 'lucide-react';
 import { questionApi, examApi, examSectionApi, mediaApi, aiApi } from '../services/api';
 import Layout from '../components/Layout';
 import Modal from '../components/common/Modal';
@@ -160,6 +161,23 @@ function normalizeMcqOptions(options) {
     return { ok: false, options: nonBlank, reason: 'Provide at least 2 non-empty options.' };
   }
   return { ok: false, options: nonBlank, reason: 'Mark exactly 1 correct option.' };
+}
+
+function buildQuestionPayload(form) {
+  return {
+    sectionId: parseInt(form.sectionId, 10),
+    questionText: form.questionText.trim(),
+    questionType: form.questionType,
+    points: form.points,
+    listeningAudioUrl: form.listeningAudioUrl || undefined,
+    transcript: form.transcript || undefined,
+    minWords: form.questionType === QUESTION_TYPES.WRITING ? form.minWords : undefined,
+    maxWords: form.questionType === QUESTION_TYPES.WRITING ? form.maxWords : undefined,
+    options:
+      form.questionType === QUESTION_TYPES.MULTIPLE_CHOICE || form.questionType === QUESTION_TYPES.LISTENING
+        ? form.options
+        : undefined,
+  };
 }
 
 function QuestionFormFields({
@@ -419,13 +437,13 @@ function QuestionFormFields({
   );
 }
 
-function AddQuestionModal({ examId, onClose, onSuccess }) {
+function AddQuestionModal({ examId, onClose, onSuccess, initialBulkMode = false }) {
   const [sections, setSections] = useState([]);
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(false);
   const [audioUploading, setAudioUploading] = useState(false);
   const [bulkText, setBulkText] = useState('');
-  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkMode, setBulkMode] = useState(initialBulkMode);
   const [bulkTab, setBulkTab] = useState('EDITOR'); // EDITOR | LINES | JSON
   const [bulkItems, setBulkItems] = useState([createBulkItem()]);
   const [bulkJson, setBulkJson] = useState('');
@@ -469,20 +487,7 @@ function AddQuestionModal({ examId, onClose, onSuccess }) {
       toast.error('Select a section.');
       return;
     }
-    const payload = {
-      sectionId: parseInt(form.sectionId, 10),
-      questionText: form.questionText.trim(),
-      questionType: form.questionType,
-      points: form.points,
-      listeningAudioUrl: form.listeningAudioUrl || undefined,
-      transcript: form.transcript || undefined,
-      minWords: form.questionType === QUESTION_TYPES.WRITING ? form.minWords : undefined,
-      maxWords: form.questionType === QUESTION_TYPES.WRITING ? form.maxWords : undefined,
-      options:
-        form.questionType === QUESTION_TYPES.MULTIPLE_CHOICE || form.questionType === QUESTION_TYPES.LISTENING
-          ? form.options
-          : undefined,
-    };
+    const payload = buildQuestionPayload(form);
     setLoading(true);
     try {
       if (bulkMode) {
@@ -884,20 +889,7 @@ function EditQuestionModal({ question, onClose, onSuccess }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const payload = {
-      sectionId: parseInt(form.sectionId, 10),
-      questionText: form.questionText.trim(),
-      questionType: form.questionType,
-      points: form.points,
-      listeningAudioUrl: form.listeningAudioUrl || undefined,
-      transcript: form.transcript || undefined,
-      minWords: form.questionType === QUESTION_TYPES.WRITING ? form.minWords : undefined,
-      maxWords: form.questionType === QUESTION_TYPES.WRITING ? form.maxWords : undefined,
-      options:
-        form.questionType === QUESTION_TYPES.MULTIPLE_CHOICE || form.questionType === QUESTION_TYPES.LISTENING
-          ? form.options
-          : undefined,
-    };
+    const payload = buildQuestionPayload(form);
     setLoading(true);
     try {
       await questionApi.update(question.id, payload);
@@ -946,6 +938,7 @@ export default function QuestionBank() {
   const [questions, setQuestions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [addMode, setAddMode] = useState('single');
   const [editQ, setEditQ] = useState(null);
   const [deleteQ, setDeleteQ] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -1023,6 +1016,13 @@ export default function QuestionBank() {
     }
   };
 
+  const openAddModal = (mode) => {
+    setAddMode(mode);
+    setShowAdd(true);
+  };
+
+  const ocrHref = filterExamId ? `/ocr?examId=${encodeURIComponent(filterExamId)}` : '/ocr';
+
   return (
     <Layout>
       <div className="space-y-5">
@@ -1043,9 +1043,15 @@ export default function QuestionBank() {
                 ))}
               </select>
             </div>
-            <Link to="/exams" className="text-sm text-blue-600 hover:underline font-medium self-start sm:self-center">
-              Exam management →
-            </Link>
+            <div className="flex flex-wrap gap-2 self-start sm:self-center">
+              <Link to={ocrHref} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50">
+                <FileScan className="h-4 w-4 text-blue-600" />
+                OCR scan
+              </Link>
+              <Link to="/exams" className="inline-flex items-center rounded-xl px-3 py-2 text-sm font-semibold text-blue-600 hover:bg-blue-50">
+                Exam management
+              </Link>
+            </div>
           </div>
           <div className="relative flex-1">
             <svg
@@ -1080,7 +1086,11 @@ export default function QuestionBank() {
                 {t === 'MULTIPLE_CHOICE' ? 'MC' : t === 'ALL' ? 'All' : t.charAt(0) + t.slice(1).toLowerCase()}
               </button>
             ))}
-            <Button variant="primary" size="sm" onClick={() => setShowAdd(true)} disabled={!filterExamId}>
+            <Button variant="secondary" size="sm" onClick={() => openAddModal('bulk')} disabled={!filterExamId}>
+              <ListPlus className="h-4 w-4" />
+              Bulk import
+            </Button>
+            <Button variant="primary" size="sm" onClick={() => openAddModal('single')} disabled={!filterExamId}>
               + Add question
             </Button>
           </div>
@@ -1162,9 +1172,10 @@ export default function QuestionBank() {
         )}
       </div>
 
-      <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title="Add Question" maxWidth="max-w-2xl">
+      <Modal isOpen={showAdd} onClose={() => setShowAdd(false)} title={addMode === 'bulk' ? 'Bulk Import Questions' : 'Add Question'} maxWidth="max-w-2xl">
         <AddQuestionModal
           examId={filterExamId ? parseInt(filterExamId, 10) : null}
+          initialBulkMode={addMode === 'bulk'}
           onClose={() => setShowAdd(false)}
           onSuccess={() => {
             setShowAdd(false);

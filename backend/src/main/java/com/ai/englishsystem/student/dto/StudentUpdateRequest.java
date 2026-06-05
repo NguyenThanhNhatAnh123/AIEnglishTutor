@@ -25,5 +25,8 @@ public class StudentUpdateRequest {
     @Size(max = 50)
     private String studentCode;
 
+    @Size(max = 20)
+    private String status;
+
     private LocalDate dateOfBirth;
 }

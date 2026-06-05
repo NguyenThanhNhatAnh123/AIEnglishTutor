@@ -52,7 +52,7 @@ public class TeacherDashboardService {
     private List<ExamResponse> loadDashboardExams(Integer teacherId) {
         List<ExamDashboardRow> rows = teacherId == null
                 ? examRepository.findDashboardRowsForAdmin()
-                : examRepository.findDashboardRowsForTeacher("ACTIVE", teacherId);
+                : examRepository.findDashboardRowsForTeacher(teacherId);
         return rows.stream()
                 .map(ExamDashboardRow::toResponse)
                 .sorted(Comparator.comparing(

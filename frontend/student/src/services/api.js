@@ -37,6 +37,7 @@ api.interceptors.response.use(
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
   register: (data) => api.post('/auth/register', data),
+  changePassword: (data) => api.put('/auth/change-password', data),
 };
 
 export const studentApi = {
@@ -50,6 +51,7 @@ export const studentExamApi = {
   start: (examId) => api.post(`/student/exams/${examId}/start`),
   getExam: (examId) => api.get(`/student/exams/${examId}`),
   saveAnswer: (body) => api.post('/student/answers', body),
+  saveAnswersBatch: (answers) => api.post('/student/answers/batch', { answers }),
   submit: (submissionId, body) =>
     api.post(`/student/submissions/${submissionId}/submit`, body ?? {}),
   /** Load saved answers for exam resume */

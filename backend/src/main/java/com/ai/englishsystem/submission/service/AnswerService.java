@@ -1,6 +1,7 @@
 package com.ai.englishsystem.submission.service;
 
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -9,12 +10,12 @@ import java.util.stream.Collectors;
 import com.ai.englishsystem.common.exception.BadRequestException;
 import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
+import com.ai.englishsystem.common.security.AccessControlService;
 import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.exam.entity.ExamSection;
 import com.ai.englishsystem.exam.entity.Question;
 import com.ai.englishsystem.exam.service.StudentExamService;
 import com.ai.englishsystem.result.entity.Feedback;
-import com.ai.englishsystem.result.entity.WritingReviewStatus;
 import com.ai.englishsystem.result.repository.FeedbackRepository;
 import com.ai.englishsystem.exam.repository.QuestionRepository;
 import com.ai.englishsystem.student.entity.Student;
@@ -22,11 +23,12 @@ import com.ai.englishsystem.student.repository.StudentRepository;
 import com.ai.englishsystem.submission.dto.AnswerRequest;
 import com.ai.englishsystem.submission.dto.AnswerResponse;
 import com.ai.englishsystem.submission.entity.Answer;
+import com.ai.englishsystem.submission.entity.AnswerType;
 import com.ai.englishsystem.submission.entity.Submission;
 import com.ai.englishsystem.submission.entity.SubmissionStatus;
+import com.ai.englishsystem.submission.mapper.AnswerMapper;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
 import com.ai.englishsystem.submission.repository.SubmissionRepository;
-import com.ai.englishsystem.exam.entity.QuestionOption;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,19 +43,55 @@ public class AnswerService {
     private final StudentRepository studentRepository;
     private final StudentExamService studentExamService;
     private final FeedbackRepository feedbackRepository;
+    private final AnswerMapper answerMapper;
+    private final AccessControlService accessControlService;
 
     @Transactional
     public AnswerResponse saveOrUpdate(AnswerRequest request) {
+        return saveOrUpdateBatch(List.of(request)).get(0);
+    }
+
+    @Transactional
+    public List<AnswerResponse> saveOrUpdateBatch(List<AnswerRequest> requests) {
+        if (requests == null || requests.isEmpty()) {
+            throw new BadRequestException("answers is required");
+        }
+        if (requests.size() > 200) {
+            throw new BadRequestException("At most 200 answers can be saved in one batch");
+        }
+        if (requests.stream().anyMatch(Objects::isNull)) {
+            throw new BadRequestException("Answer payload cannot be null");
+        }
+
+        List<Integer> submissionIds = requests.stream()
+                .map(AnswerRequest::getSubmissionId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (submissionIds.size() != 1 || requests.stream().anyMatch(r -> r.getSubmissionId() == null)) {
+            throw new BadRequestException("All answers in one batch must target the same submission");
+        }
+
+        Map<Integer, AnswerRequest> requestByQuestionId = new LinkedHashMap<>();
+        for (AnswerRequest request : requests) {
+            if (request.getQuestionId() == null) {
+                throw new BadRequestException("questionId is required");
+            }
+            requestByQuestionId.put(request.getQuestionId(), request);
+        }
+
         Integer userId = SecurityUtils.getCurrentUserId();
         Student student = studentRepository.findByUser_Id(userId)
                 .orElseThrow(() -> new ForbiddenException("Student profile not found for current user"));
 
-        Submission submission = submissionRepository.findWithAssociationsByIdForUpdate(request.getSubmissionId())
-                .orElseThrow(() -> new NotFoundException("Submission", request.getSubmissionId()));
+        Integer submissionId = submissionIds.get(0);
+        Submission submission = submissionRepository.findWithAssociationsByIdForUpdate(submissionId)
+                .orElseThrow(() -> new NotFoundException("Submission", submissionId));
 
         if (!submission.getStudent().getId().equals(student.getId())) {
             throw new ForbiddenException("Cannot answer for another student's submission");
         }
+        studentExamService.assertStudentCanAccessExam(student, submission.getExam().getId());
 
         if (submission.getStatus() != SubmissionStatus.IN_PROGRESS) {
             throw new BadRequestException("Submission is not in progress");
@@ -61,34 +99,60 @@ public class AnswerService {
 
         studentExamService.assertWithinDeadline(submission);
 
-        Question question = questionRepository.findByIdWithSectionExam(request.getQuestionId())
-                .orElseThrow(() -> new NotFoundException("Question", request.getQuestionId()));
-
-        if (!questionBelongsToExam(question, submission.getExam())) {
-            throw new BadRequestException("Question does not belong to this exam");
+        Map<Integer, Question> questionById = questionRepository.findByIdInWithSectionExam(requestByQuestionId.keySet())
+                .stream()
+                .collect(Collectors.toMap(Question::getId, question -> question));
+        for (Integer questionId : requestByQuestionId.keySet()) {
+            if (!questionById.containsKey(questionId)) {
+                throw new NotFoundException("Question", questionId);
+            }
         }
 
-        validateAnswerShape(question, request);
+        Map<Integer, Answer> existingByQuestionId = answerRepository.findBySubmissionFetchQuestion(submission).stream()
+                .filter(answer -> answer.getQuestion() != null && answer.getQuestion().getId() != null)
+                .collect(Collectors.toMap(answer -> answer.getQuestion().getId(), answer -> answer, (a, b) -> a));
 
-        var existing = answerRepository.findBySubmissionAndQuestion(submission, question);
-        Answer answer;
-        if (existing.isPresent()) {
-            answer = existing.get();
-            mergeAnswerFromRequest(answer, request);
-        } else {
-            answer = Answer.builder()
-                    .submission(submission)
-                    .question(question)
-                    .answerText(request.getAnswerText())
-                    .selectedOptionId(request.getSelectedOptionId())
-                    .speakingAudioUrl(request.getSpeakingAudioUrl())
-                    .speakingDurationSeconds(request.getSpeakingDurationSeconds())
-                    .speakingFormat(request.getSpeakingFormat())
-                    .imageUrl(request.getImageUrl())
-                    .build();
+        List<Answer> toSave = requestByQuestionId.entrySet().stream()
+                .map(entry -> {
+                    Question question = questionById.get(entry.getKey());
+                    AnswerRequest request = entry.getValue();
+
+                    if (!questionBelongsToExam(question, submission.getExam())) {
+                        throw new BadRequestException("Question does not belong to this exam");
+                    }
+                    validateAnswerShape(question, request);
+
+                    Answer answer = existingByQuestionId.get(question.getId());
+                    if (answer != null) {
+                        mergeAnswerFromRequest(answer, request);
+                        return answer;
+                    }
+                    return Answer.builder()
+                            .submission(submission)
+                            .question(question)
+                            .answerType(resolveAnswerType(question, request))
+                            .answerText(request.getAnswerText())
+                            .selectedOptionId(request.getSelectedOptionId())
+                            .speakingAudioUrl(request.getSpeakingAudioUrl())
+                            .speakingDurationSeconds(request.getSpeakingDurationSeconds())
+                            .speakingFormat(request.getSpeakingFormat())
+                            .imageUrl(request.getImageUrl())
+                            .build();
+                })
+                .toList();
+
+        return answerRepository.saveAll(toSave).stream()
+                .map(answer -> answerMapper.toResponse(answer, null, false))
+                .sorted(Comparator.comparing(AnswerResponse::getQuestionId, Comparator.nullsLast(Integer::compareTo)))
+                .collect(Collectors.toList());
+    }
+
+    private boolean optionBelongsToQuestion(Question question, Integer optionId) {
+        if (optionId == null) {
+            return false;
         }
-        answer = answerRepository.save(answer);
-        return toResponse(answer, null, false);
+        return question.getOptions() != null && question.getOptions().stream()
+                .anyMatch(option -> option.getId() != null && option.getId().equals(optionId));
     }
 
     private boolean questionBelongsToExam(Question question, com.ai.englishsystem.exam.entity.Exam exam) {
@@ -107,6 +171,9 @@ public class AnswerService {
             case "LISTENING":
                 if (hasText || hasSpeaking) {
                     throw new BadRequestException("Use selectedOptionId for this question type");
+                }
+                if (hasMc && !optionBelongsToQuestion(question, request.getSelectedOptionId())) {
+                    throw new BadRequestException("Selected option does not belong to this question");
                 }
                 break;
             case "WRITING":
@@ -147,6 +214,48 @@ public class AnswerService {
         if (request.getImageUrl() != null) {
             answer.setImageUrl(request.getImageUrl());
         }
+        answer.setAnswerType(resolveAnswerType(answer));
+    }
+
+    private AnswerType resolveAnswerType(Question question, AnswerRequest request) {
+        String type = question.getQuestionType() == null ? "" : question.getQuestionType().trim().toUpperCase();
+        return switch (type) {
+            case "MULTIPLE_CHOICE", "LISTENING" -> request.getSelectedOptionId() != null ? AnswerType.CHOICE : null;
+            case "WRITING" -> hasText(request.getAnswerText()) ? AnswerType.TEXT : null;
+            case "SPEAKING" -> hasText(request.getSpeakingAudioUrl()) ? AnswerType.AUDIO : null;
+            default -> {
+                if (request.getSelectedOptionId() != null) {
+                    yield AnswerType.CHOICE;
+                }
+                if (hasText(request.getSpeakingAudioUrl())) {
+                    yield AnswerType.AUDIO;
+                }
+                yield hasText(request.getAnswerText()) ? AnswerType.TEXT : null;
+            }
+        };
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private AnswerType resolveAnswerType(Answer answer) {
+        String type = answer.getQuestion() == null || answer.getQuestion().getQuestionType() == null
+                ? "" : answer.getQuestion().getQuestionType().trim().toUpperCase();
+        return switch (type) {
+            case "MULTIPLE_CHOICE", "LISTENING" -> answer.getSelectedOptionId() != null ? AnswerType.CHOICE : null;
+            case "WRITING" -> hasText(answer.getAnswerText()) ? AnswerType.TEXT : null;
+            case "SPEAKING" -> hasText(answer.getSpeakingAudioUrl()) ? AnswerType.AUDIO : null;
+            default -> {
+                if (answer.getSelectedOptionId() != null) {
+                    yield AnswerType.CHOICE;
+                }
+                if (hasText(answer.getSpeakingAudioUrl())) {
+                    yield AnswerType.AUDIO;
+                }
+                yield hasText(answer.getAnswerText()) ? AnswerType.TEXT : null;
+            }
+        };
     }
 
     /**
@@ -174,8 +283,8 @@ public class AnswerService {
         boolean submitted = submission.getStatus() != SubmissionStatus.IN_PROGRESS;
         return answers.stream()
                 .map(answer -> submitted
-                        ? toResponse(answer, feedbackByAnswerId.get(answer.getId()), true)
-                        : toResponse(answer, null, false))
+                        ? answerMapper.toResponse(answer, feedbackByAnswerId.get(answer.getId()), true)
+                        : answerMapper.toResponse(answer, null, false))
                 .sorted(Comparator.comparing(AnswerResponse::getQuestionId, Comparator.nullsLast(Integer::compareTo)))
                 .collect(Collectors.toList());
     }
@@ -188,7 +297,10 @@ public class AnswerService {
         Submission submission = submissionRepository.findWithAssociationsById(submissionId)
                 .orElseThrow(() -> new NotFoundException("Submission", submissionId));
 
-        assertTeacherCanAccess(submission);
+        accessControlService.assertTeacherOrAdminCanAccessSubmission(
+                submission,
+                "You do not have permission to view this submission"
+        );
 
         List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
         Map<Integer, Feedback> feedbackByAnswerId = feedbackRepository.findByAnswerIn(answers).stream()
@@ -196,7 +308,7 @@ public class AnswerService {
                 .collect(Collectors.toMap(f -> f.getAnswer().getId(), f -> f));
 
         return answers.stream()
-                .map(answer -> toResponse(answer, feedbackByAnswerId.get(answer.getId()), false))
+                .map(answer -> answerMapper.toResponse(answer, feedbackByAnswerId.get(answer.getId()), false))
                 .sorted(Comparator.comparing(AnswerResponse::getQuestionId, Comparator.nullsLast(Integer::compareTo)))
                 .collect(Collectors.toList());
     }
@@ -222,7 +334,10 @@ public class AnswerService {
 
         List<Submission> submissions = submissionRepository.findAllWithAssociationsByIdIn(uniqueSubmissionIds);
         for (Submission submission : submissions) {
-            assertTeacherCanAccess(submission);
+            accessControlService.assertTeacherOrAdminCanAccessSubmission(
+                    submission,
+                    "You do not have permission to view this submission"
+            );
         }
 
         List<Answer> fetchedAnswers = answerRepository.findBySubmissionIdInFetchQuestion(uniqueSubmissionIds);
@@ -231,7 +346,7 @@ public class AnswerService {
                 .collect(Collectors.toMap(f -> f.getAnswer().getId(), f -> f));
 
         Map<Integer, List<AnswerResponse>> grouped = fetchedAnswers.stream()
-                .map(answer -> toResponse(answer, feedbackByAnswerId.get(answer.getId()), false))
+                .map(answer -> answerMapper.toResponse(answer, feedbackByAnswerId.get(answer.getId()), false))
                 .collect(Collectors.groupingBy(AnswerResponse::getSubmissionId));
 
         for (Integer submissionId : uniqueSubmissionIds) {
@@ -245,72 +360,4 @@ public class AnswerService {
         return grouped;
     }
 
-    private void assertTeacherCanAccess(Submission submission) {
-        if (SecurityUtils.hasRole("ADMIN")) {
-            return;
-        }
-        if (SecurityUtils.hasRole("TEACHER")) {
-            Integer currentUserId = SecurityUtils.getCurrentUserId();
-            Integer ownerUserId = submission.getExam().getTeacher().getUser().getId();
-            if (!currentUserId.equals(ownerUserId)) {
-                throw new ForbiddenException("You do not have permission to view this submission");
-            }
-            return;
-        }
-        throw new ForbiddenException("Not allowed");
-    }
-
-    private AnswerResponse toResponse(Answer answer, Feedback feedback, boolean maskUnpublishedReviewsForStudent) {
-        String type = answer.getQuestion() != null ? answer.getQuestion().getQuestionType() : null;
-        boolean isWriting = "WRITING".equalsIgnoreCase(type != null ? type.trim() : "");
-        boolean isSpeaking = "SPEAKING".equalsIgnoreCase(type != null ? type.trim() : "");
-        WritingReviewStatus status = feedback != null && feedback.getReviewStatus() != null
-                ? feedback.getReviewStatus() : WritingReviewStatus.DRAFT;
-        boolean published = status == WritingReviewStatus.PUBLISHED;
-        boolean hideTeacherFields = maskUnpublishedReviewsForStudent && !published;
-
-        String questionText = answer.getQuestion() != null ? answer.getQuestion().getQuestionText() : null;
-        String selectedOptionText = resolveSelectedOptionText(answer);
-
-        return AnswerResponse.builder()
-                .id(answer.getId())
-                .submissionId(answer.getSubmission().getId())
-                .questionId(answer.getQuestion().getId())
-                .questionText(questionText)
-                .questionType(answer.getQuestion().getQuestionType())
-                .answerText(answer.getAnswerText())
-                .selectedOptionId(answer.getSelectedOptionId())
-                .selectedOptionText(selectedOptionText)
-                .speakingAudioUrl(answer.getSpeakingAudioUrl())
-                .speakingDurationSeconds(answer.getSpeakingDurationSeconds())
-                .speakingFormat(answer.getSpeakingFormat())
-                .imageUrl(answer.getImageUrl())
-                .writingReviewStatus(isWriting ? status.name() : null)
-                .writingDraftScore(isWriting && feedback != null && !hideTeacherFields ? feedback.getDraftScore() : null)
-                .writingDraftFeedback(isWriting && feedback != null && !hideTeacherFields ? feedback.getAiFeedback() : null)
-                .writingPublishedScore(isWriting && feedback != null && published ? feedback.getPublishedScore() : null)
-                .writingPublishedFeedback(isWriting && feedback != null && published ? feedback.getTeacherFeedback() : null)
-                .writingPublishedAt(isWriting && feedback != null && published ? feedback.getPublishedAt() : null)
-                .speakingReviewStatus(isSpeaking ? status.name() : null)
-                .speakingDraftScore(isSpeaking && feedback != null && !hideTeacherFields ? feedback.getDraftScore() : null)
-                .speakingDraftFeedback(isSpeaking && feedback != null && !hideTeacherFields ? feedback.getAiFeedback() : null)
-                .speakingDraftTranscript(isSpeaking && feedback != null && !hideTeacherFields ? feedback.getDraftTranscript() : null)
-                .speakingPublishedScore(isSpeaking && feedback != null && published ? feedback.getPublishedScore() : null)
-                .speakingPublishedFeedback(isSpeaking && feedback != null && published ? feedback.getTeacherFeedback() : null)
-                .speakingPublishedTranscript(isSpeaking && feedback != null && published ? feedback.getPublishedTranscript() : null)
-                .speakingPublishedAt(isSpeaking && feedback != null && published ? feedback.getPublishedAt() : null)
-                .build();
-    }
-
-    private String resolveSelectedOptionText(Answer answer) {
-        if (answer.getSelectedOptionId() == null || answer.getQuestion() == null) {
-            return null;
-        }
-        return answer.getQuestion().getOptions().stream()
-                .filter(option -> option != null && option.getId() != null
-                        && option.getId().equals(answer.getSelectedOptionId()))
-                .map(QuestionOption::getOptionText)
-                .findFirst()
-                .orElse(null);
-    }
 }

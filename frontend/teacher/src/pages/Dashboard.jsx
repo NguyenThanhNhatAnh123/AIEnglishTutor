@@ -57,10 +57,10 @@ function buildInsights(stats) {
 
   if (stats.suspiciousSubs.length > 0) {
     insights.push({
-      label: 'Integrity',
-      title: `${stats.suspiciousSubs.length} flagged submissions need review`,
-      description: 'Check suspicious events before publishing final outcomes or using the scores for placement.',
-      action: 'Open results',
+      label: 'Giám sát',
+      title: `${stats.suspiciousSubs.length} bài nộp có cảnh báo cần xem lại`,
+      description: 'Kiểm tra sự kiện bất thường trước khi công bố kết quả hoặc dùng điểm để xếp lớp.',
+      action: 'Mở kết quả',
       severity: 'high',
       icon: ShieldAlert,
     });
@@ -68,10 +68,10 @@ function buildInsights(stats) {
 
   if (stats.averageScore != null && stats.averageScore < 60) {
     insights.push({
-      label: 'Difficulty',
-      title: 'Average score is below target',
-      description: 'The current exam mix may be too difficult or students may need a targeted review session.',
-      action: 'Inspect exams',
+      label: 'Độ khó',
+      title: 'Điểm trung bình đang thấp hơn mục tiêu',
+      description: 'Bộ đề hiện tại có thể hơi khó hoặc học viên cần một buổi ôn tập có mục tiêu.',
+      action: 'Kiểm tra bài thi',
       severity: 'medium',
       icon: TrendingDown,
     });
@@ -79,10 +79,10 @@ function buildInsights(stats) {
 
   if (stats.completionRate > 0 && stats.completionRate < 72) {
     insights.push({
-      label: 'Completion',
-      title: 'Completion rate is trailing',
-      description: 'A reminder campaign could help students finish open attempts before grading windows close.',
-      action: 'View activity',
+      label: 'Hoàn thành',
+      title: 'Tỉ lệ hoàn thành đang chậm',
+      description: 'Nhắc nhở học viên có thể giúp họ hoàn tất các lần làm bài trước khi đóng chấm điểm.',
+      action: 'Xem hoạt động',
       severity: 'medium',
       icon: AlertTriangle,
     });
@@ -90,10 +90,10 @@ function buildInsights(stats) {
 
   if (stats.inProgressSubs.length > 0) {
     insights.push({
-      label: 'Live',
-      title: `${stats.inProgressSubs.length} attempts are still in progress`,
-      description: 'Monitor active sessions and watch for late submissions or unusual timing patterns.',
-      action: 'Track sessions',
+      label: 'Đang diễn ra',
+      title: `${stats.inProgressSubs.length} lần làm bài vẫn đang thực hiện`,
+      description: 'Theo dõi phiên đang hoạt động, bài nộp trễ và các mẫu thời gian bất thường.',
+      action: 'Theo dõi phiên',
       severity: 'info',
       icon: Sparkles,
     });
@@ -102,18 +102,18 @@ function buildInsights(stats) {
   if (insights.length === 0) {
     insights.push(
       {
-        label: 'Healthy',
-        title: 'No urgent review signals detected',
-        description: 'Your current exam health looks stable. Keep watching submissions as new attempts arrive.',
-        action: 'Keep monitoring',
+        label: 'Ổn định',
+        title: 'Chưa có tín hiệu cần xử lý gấp',
+        description: 'Tình trạng bài thi hiện đang ổn định. Tiếp tục theo dõi khi có lần nộp mới.',
+        action: 'Tiếp tục theo dõi',
         severity: 'low',
         icon: TrendingUp,
       },
       {
-        label: 'Growth',
-        title: 'Question bank is ready to expand',
-        description: 'Add fresh listening, writing, and speaking prompts to improve exam variety.',
-        action: 'Add questions',
+        label: 'Mở rộng',
+        title: 'Ngân hàng câu hỏi sẵn sàng bổ sung',
+        description: 'Thêm đề nghe, viết và nói mới để tăng độ đa dạng của bài thi.',
+        action: 'Thêm câu hỏi',
         severity: 'info',
         icon: FileQuestion,
       }
@@ -174,7 +174,7 @@ export default function Dashboard() {
       const key = s.examId;
       const current = examAggMap.get(key) || {
         examId: s.examId,
-        examTitle: s.examTitle || `Exam #${s.examId}`,
+        examTitle: s.examTitle || `Bài thi #${s.examId}`,
         attempts: 0,
         gradedAttempts: 0,
         scoreSum: 0,
@@ -251,44 +251,44 @@ export default function Dashboard() {
   }
 
   const statusData = [
-    { name: 'Completed', value: stats.completedSubs.length, color: '#10B981' },
-    { name: 'In progress', value: stats.inProgressSubs.length, color: '#F59E0B' },
-    { name: 'Flagged', value: stats.suspiciousSubs.length, color: '#EF4444' },
+    { name: 'Đã nộp', value: stats.completedSubs.length, color: '#10B981' },
+    { name: 'Đang làm', value: stats.inProgressSubs.length, color: '#F59E0B' },
+    { name: 'Cảnh báo', value: stats.suspiciousSubs.length, color: '#EF4444' },
   ];
 
   const metricCards = [
     {
-      label: 'Active Exams',
+      label: 'Bài thi đang mở',
       value: stats.activeExams.length,
-      hint: `${stats.manageableExams.length} manageable exams`,
-      trend: 'Live',
+      hint: `${stats.manageableExams.length} bài thi quản lý`,
+      trend: 'Đang mở',
       icon: ClipboardCheck,
       tone: 'indigo',
       miniData: stats.dayBuckets.map((item) => item.count),
     },
     {
-      label: 'Average Score',
+      label: 'Điểm trung bình',
       value: formatScore(stats.averageScore),
-      hint: `${stats.gradedSubs.length} graded submissions`,
-      trend: `${stats.passRate}% pass`,
+      hint: `${stats.gradedSubs.length} bài nộp đã có điểm`,
+      trend: `${stats.passRate}% đạt`,
       icon: Target,
       tone: 'emerald',
       miniData: stats.examPerformance.map((item) => item.avgScore),
     },
     {
-      label: 'Completion Rate',
+      label: 'Tỉ lệ hoàn thành',
       value: formatPercent(stats.completionRate),
-      hint: `${stats.completedSubs.length} completed of ${submissions.length}`,
-      trend: 'Workflow',
+      hint: `${stats.completedSubs.length} đã nộp trên ${submissions.length}`,
+      trend: 'Tiến độ',
       icon: TrendingUp,
       tone: 'sky',
       miniData: [stats.completedSubs.length, stats.inProgressSubs.length, stats.pendingReviews.length],
     },
     {
-      label: 'Pending Reviews',
+      label: 'Chờ chấm',
       value: stats.pendingReviews.length,
-      hint: 'Submitted without final score',
-      trend: stats.pendingReviews.length ? 'Review' : 'Clear',
+      hint: 'Đã nộp nhưng chưa có điểm cuối',
+      trend: stats.pendingReviews.length ? 'Cần chấm' : 'Đã xong',
       icon: ShieldAlert,
       tone: stats.pendingReviews.length ? 'amber' : 'slate',
       miniData: [stats.pendingReviews.length, stats.suspiciousSubs.length, stats.inProgressSubs.length],
@@ -313,42 +313,42 @@ export default function Dashboard() {
           <div className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)] lg:p-7">
             <div>
               <Badge variant="outline" className="bg-white/80">
-                AI-powered teacher command center
+                Trung tâm quản lý giáo viên có AI
               </Badge>
               <h1 className="mt-4 max-w-3xl text-3xl font-bold tracking-normal text-slate-950 md:text-4xl">
-                Teaching intelligence for exams, progress, and review quality.
+                Theo dõi bài thi, tiến độ và chất lượng chấm bài.
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500 md:text-base">
-                Monitor exam health, student activity, completion quality, and AI-detected risk signals from one calm workspace.
+                Quan sát tình trạng bài thi, hoạt động học viên, mức độ hoàn thành và tín hiệu rủi ro do AI phát hiện trong một không gian làm việc gọn gàng.
               </p>
               <div className="mt-6 flex flex-wrap items-center gap-2">
                 <Button asChild>
-                  <Link to="/results">Review submissions</Link>
+                  <Link to="/results">Chấm bài nộp</Link>
                 </Button>
                 <Button asChild variant="outline">
-                  <Link to="/exams">Manage exams</Link>
+                  <Link to="/exams">Quản lý bài thi</Link>
                 </Button>
                 <Button asChild variant="ghost">
-                  <Link to="/questions">Open question bank</Link>
+                  <Link to="/questions">Mở ngân hàng câu hỏi</Link>
                 </Button>
               </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
               <div className="rounded-lg bg-slate-950 p-4 text-white shadow-soft">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-200">Today signal</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-200">Hôm nay</p>
                 <p className="mt-3 text-3xl font-bold">{stats.dayBuckets.at(-1)?.count || 0}</p>
-                <p className="mt-1 text-sm text-slate-300">attempts recorded today</p>
+                <p className="mt-1 text-sm text-slate-300">lần làm bài được ghi nhận hôm nay</p>
               </div>
               <div className="rounded-lg border border-white/70 bg-white/70 p-4">
                 <UsersRound className="h-5 w-5 text-indigo-500" />
                 <p className="mt-3 text-2xl font-bold text-slate-950">{stats.uniqueStudents.size}</p>
-                <p className="text-sm text-slate-500">active students</p>
+                <p className="text-sm text-slate-500">học viên đang hoạt động</p>
               </div>
               <div className="rounded-lg border border-white/70 bg-white/70 p-4">
                 <BookOpenCheck className="h-5 w-5 text-violet-500" />
                 <p className="mt-3 text-2xl font-bold text-slate-950">{stats.questionTotal}</p>
-                <p className="text-sm text-slate-500">question bank items</p>
+                <p className="text-sm text-slate-500">câu hỏi trong ngân hàng</p>
               </div>
             </div>
           </div>
@@ -364,17 +364,17 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
           <DashboardPanel
-            title="Submission Trends"
-            description="Attempts recorded over the last seven days."
-            action={<Badge variant="info">{submissions.length} total</Badge>}
+            title="Xu hướng nộp bài"
+            description="Số lần làm bài trong bảy ngày gần nhất."
+            action={<Badge variant="info">{submissions.length} tổng</Badge>}
           >
             <SubmissionTrendChart data={stats.dayBuckets} />
           </DashboardPanel>
 
           <DashboardPanel
-            title="Completion Mix"
-            description="Completed, live, and flagged work."
-            action={<Badge variant="success">{stats.passRate}% pass</Badge>}
+            title="Cơ cấu trạng thái"
+            description="Bài đã nộp, đang làm và có cảnh báo."
+            action={<Badge variant="success">{stats.passRate}% đạt</Badge>}
           >
             <StatusMixChart data={statusData} total={submissions.length} passRate={stats.passRate} />
           </DashboardPanel>
@@ -382,17 +382,17 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,1.05fr)]">
           <DashboardPanel
-            title="Exam Performance"
-            description="Average score by exam, ranked by activity."
-            action={<Badge variant="outline">{stats.examPerformance.length} exams</Badge>}
+            title="Hiệu suất bài thi"
+            description="Điểm trung bình theo bài thi, sắp xếp theo mức độ hoạt động."
+            action={<Badge variant="outline">{stats.examPerformance.length} bài thi</Badge>}
           >
             <ExamPerformanceChart data={stats.examPerformance} />
           </DashboardPanel>
 
           <DashboardPanel
-            title="Recent Activity"
-            description="A live timeline of the latest student submissions."
-            action={<Link to="/results" className="text-sm font-bold text-indigo-600 transition hover:text-indigo-700">Open results</Link>}
+            title="Hoạt động gần đây"
+            description="Dòng thời gian các bài nộp mới nhất của học viên."
+            action={<Link to="/results" className="text-sm font-bold text-indigo-600 transition hover:text-indigo-700">Mở kết quả</Link>}
           >
             <ActivityTimeline items={stats.recentSubmissions} formatScore={formatScore} formatDateTime={formatDateTime} />
           </DashboardPanel>
@@ -404,23 +404,23 @@ export default function Dashboard() {
               <div>
                 <div className="inline-flex items-center gap-2 rounded-md bg-indigo-50 px-2.5 py-1 text-xs font-bold uppercase tracking-[0.14em] text-indigo-600">
                   <GraduationCap className="h-3.5 w-3.5" />
-                  Cohort overview
+                  Tổng quan lớp học
                 </div>
-                <h2 className="mt-3 text-xl font-bold text-slate-950">{classCount} managed classes</h2>
-                <p className="mt-1 text-sm text-slate-500">Use classes to organize access, exam assignment, and performance review.</p>
+                <h2 className="mt-3 text-xl font-bold text-slate-950">{classCount} lớp đang quản lý</h2>
+                <p className="mt-1 text-sm text-slate-500">Dùng lớp học để sắp xếp quyền truy cập, giao bài thi và xem hiệu suất.</p>
               </div>
               <Button asChild variant="outline">
-                <Link to="/classes">Manage classes</Link>
+                <Link to="/classes">Quản lý lớp</Link>
               </Button>
             </div>
           </DashboardPanel>
 
           <DashboardPanel>
-                <p className="text-sm font-semibold text-slate-500">Question readiness</p>
+                <p className="text-sm font-semibold text-slate-500">Sẵn sàng câu hỏi</p>
                 <div className="mt-4 flex items-end justify-between gap-4">
                   <div>
                 <p className="text-4xl font-bold text-slate-950">{stats.questionTotal}</p>
-                <p className="mt-1 text-sm text-slate-500">Reusable items</p>
+                <p className="mt-1 text-sm text-slate-500">mục có thể dùng lại</p>
               </div>
               <FileQuestion className="h-10 w-10 text-violet-500" />
             </div>

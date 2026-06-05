@@ -7,7 +7,6 @@ import { APP_BASE_PATH } from '../../packages/utils/constants.js';
 import Layout from './components/layout/Layout';
 
 const LoginPage = lazy(() => import('./pages/LoginPage'));
-const RegisterPage = lazy(() => import('./pages/RegisterPage'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const ExamList = lazy(() => import('./pages/ExamList'));
 const ExamPage = lazy(() => import('./pages/ExamPage'));
@@ -34,7 +33,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
+      <Route path="/register" element={<Navigate to="/login" replace />} />
 
       {/* Protected routes using Layout shell */}
       <Route element={<ProtectedLayout />}>

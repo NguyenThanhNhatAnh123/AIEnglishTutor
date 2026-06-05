@@ -5,13 +5,14 @@ import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
 import com.ai.englishsystem.common.exception.UnauthorizedException;
 import com.ai.englishsystem.common.util.SecurityUtils;
+import com.ai.englishsystem.classmodule.dto.ClassSummaryRow;
 import com.ai.englishsystem.exam.dto.ExamAllowedClassRow;
 import com.ai.englishsystem.exam.dto.ExamRequest;
 import com.ai.englishsystem.exam.dto.ExamResponse;
 import com.ai.englishsystem.exam.dto.ExamSectionRequest;
 import com.ai.englishsystem.exam.dto.ExamSectionResponse;
 import com.ai.englishsystem.exam.dto.ExamSectionSummaryResponse;
-import com.ai.englishsystem.exam.dto.ExamSectionUpdateRequest;
+import com.ai.englishsystem.exam.dto.ExamWorkspaceResponse;
 import com.ai.englishsystem.exam.dto.QuestionOptionResponse;
 import com.ai.englishsystem.exam.dto.QuestionResponse;
 import com.ai.englishsystem.exam.entity.Exam;
@@ -28,6 +29,7 @@ import com.ai.englishsystem.ai.repository.AiResultRepository;
 import com.ai.englishsystem.classmodule.entity.ClassEntity;
 import com.ai.englishsystem.classmodule.repository.ClassRepository;
 import com.ai.englishsystem.speaking.service.SpeakingFileStorage;
+import com.ai.englishsystem.teacher.dto.TeacherResponse;
 import com.ai.englishsystem.teacher.entity.Teacher;
 import com.ai.englishsystem.teacher.repository.TeacherRepository;
 import com.ai.englishsystem.submission.entity.Answer;
@@ -76,8 +78,8 @@ public class ExamService {
     // ─── READ ────────────────────────────────────────────────────────────────
 
     /**
-     * Admins see all exams. Teachers see every ACTIVE exam (same pool as students) plus their own
-     * non-active drafts. Students hitting this endpoint get ACTIVE-only (prefer /api/student/exams).
+     * Admins see all exams. Teachers see only exams they own.
+     * Students hitting this endpoint get ACTIVE-only (prefer /api/student/exams).
      */
     @Transactional(readOnly = true)
     public List<ExamResponse> findAll() {
@@ -86,13 +88,38 @@ public class ExamService {
         }
         if (SecurityUtils.hasRole("TEACHER")) {
             Teacher teacher = resolveCurrentTeacher();
-            return toListResponses(examRepository.findDashboardRowsForTeacher("ACTIVE", teacher.getId()));
+            return toListResponses(examRepository.findDashboardRowsForTeacher(teacher.getId()));
         }
         List<Exam> exams = examRepository.findByStatusWithTeacher("ACTIVE");
         return exams.stream()
                 .sorted(byCreatedDesc())
                 .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public ExamWorkspaceResponse workspace() {
+        List<ExamResponse> exams;
+        List<ClassSummaryRow> classRows;
+        List<TeacherResponse> teachers;
+        if (SecurityUtils.hasRole("ADMIN")) {
+            exams = toListResponses(examRepository.findDashboardRowsForAdmin());
+            classRows = classRepository.findSummaryRowsOrderByIdDesc();
+            teachers = teacherRepository.findAll().stream().map(this::toTeacherOption).toList();
+        } else if (SecurityUtils.hasRole("TEACHER")) {
+            Teacher teacher = resolveCurrentTeacher();
+            exams = toListResponses(examRepository.findDashboardRowsForTeacher(teacher.getId()));
+            classRows = classRepository.findSummaryRowsByTeacherUserIdOrderByIdDesc(SecurityUtils.getCurrentUserId());
+            teachers = List.of(toTeacherOption(teacher));
+        } else {
+            throw new ForbiddenException("Access denied");
+        }
+
+        return ExamWorkspaceResponse.builder()
+                .exams(exams)
+                .classes(classRows.stream().map(ClassSummaryRow::toResponse).toList())
+                .teachers(teachers)
+                .build();
     }
 
     private static Comparator<Exam> byCreatedDesc() {
@@ -117,18 +144,7 @@ public class ExamService {
 
     @Transactional
     public ExamResponse create(ExamRequest request) {
-        Teacher teacher;
-        if (SecurityUtils.hasRole("ADMIN")) {
-            if (request.getTeacherId() != null) {
-                teacher = teacherRepository.findById(request.getTeacherId())
-                        .orElseThrow(() -> new NotFoundException("Teacher", request.getTeacherId()));
-            } else {
-                teacher = teacherRepository.findAll().stream().findFirst()
-                        .orElseThrow(() -> new BadRequestException("No teacher profile found. Please create a teacher first."));
-            }
-        } else {
-            teacher = resolveCurrentTeacher();
-        }
+        Teacher teacher = resolveTeacherForWrite(request.getTeacherId());
 
         ExamType examType = parseExamType(request.getExamType());
         Exam exam = Exam.builder()
@@ -140,12 +156,13 @@ public class ExamService {
                 .examType(examType)
                 .maxAttempts(resolveMaxAttempts(examType, request.getMaxAttempts()))
                 .build();
-        exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds()));
+        exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds(), teacher));
+        syncSections(exam, request.getSections());
 
         exam = examRepository.save(exam);
         assertReadyToPublishIfActive(exam);
 
-        return toResponse(exam);
+        return toResponseWithSections(exam);
     }
 
     // ─── UPDATE (full) ────────────────────────────────────────────────────────
@@ -156,11 +173,13 @@ public class ExamService {
                 .orElseThrow(() -> new NotFoundException("Exam", id));
 
         assertOwnerOrAdmin(exam);
+        Teacher teacher = resolveTeacherForWrite(request.getTeacherId());
 
         if (request.getTitle() != null && !request.getTitle().isBlank()) {
             exam.setTitle(request.getTitle());
         }
         exam.setDescription(request.getDescription());
+        exam.setTeacher(teacher);
         if (request.getDurationMinutes() != null) {
             exam.setDurationMinutes(request.getDurationMinutes());
         }
@@ -174,8 +193,9 @@ public class ExamService {
             exam.setMaxAttempts(resolveMaxAttempts(exam.getExamType(), request.getMaxAttempts()));
         }
         if (request.getAllowedClassIds() != null) {
-            exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds()));
+            exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds(), teacher));
         }
+        syncSections(exam, request.getSections());
 
         assertReadyToPublishIfActive(exam);
         exam = examRepository.save(exam);
@@ -190,6 +210,11 @@ public class ExamService {
                 .orElseThrow(() -> new NotFoundException("Exam", id));
 
         assertOwnerOrAdmin(exam);
+        Teacher teacher = exam.getTeacher();
+        if (request.getTeacherId() != null) {
+            teacher = resolveTeacherForWrite(request.getTeacherId());
+            exam.setTeacher(teacher);
+        }
 
         if (request.getTitle() != null && !request.getTitle().isBlank()) {
             exam.setTitle(request.getTitle());
@@ -210,8 +235,9 @@ public class ExamService {
             exam.setMaxAttempts(resolveMaxAttempts(exam.getExamType(), request.getMaxAttempts()));
         }
         if (request.getAllowedClassIds() != null) {
-            exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds()));
+            exam.setAllowedClasses(resolveAllowedClassesForWrite(request.getAllowedClassIds(), teacher));
         }
+        syncSections(exam, request.getSections());
 
         assertReadyToPublishIfActive(exam);
         exam = examRepository.save(exam);
@@ -230,7 +256,7 @@ public class ExamService {
         List<Answer> answers = List.of();
         if (!submissions.isEmpty()) {
             List<Integer> submissionIds = submissions.stream().map(Submission::getId).toList();
-            answers = answerRepository.findBySubmissionIdInFetchQuestion(submissionIds);
+            answers = answerRepository.findBySubmission_IdIn(submissionIds);
         }
         if (!answers.isEmpty()) {
             feedbackRepository.deleteByAnswerIn(answers);
@@ -262,100 +288,9 @@ public class ExamService {
         Exam exam = examRepository.findById(examId)
                 .orElseThrow(() -> new NotFoundException("Exam", examId));
         assertOwnerOrAdmin(exam);
-        return exam.getSections().stream()
-                .sorted((a, b) -> Integer.compare(
-                        a.getOrderIndex() != null ? a.getOrderIndex() : 0,
-                        b.getOrderIndex() != null ? b.getOrderIndex() : 0))
+        return examSectionRepository.findSummaryRowsByExamId(examId).stream()
                 .map(this::toSectionSummary)
                 .collect(Collectors.toList());
-    }
-
-    @Transactional
-    public ExamSectionSummaryResponse createSection(Integer examId, ExamSectionRequest request) {
-        Exam exam = examRepository.findById(examId)
-                .orElseThrow(() -> new NotFoundException("Exam", examId));
-        assertOwnerOrAdmin(exam);
-
-        List<ExamSection> existing = examSectionRepository.findByExamOrderByOrderIndex(exam);
-        int maxOrder = existing.stream()
-                .mapToInt(s -> s.getOrderIndex() != null ? s.getOrderIndex() : 0)
-                .max()
-                .orElse(-1);
-        int order = request.getOrderIndex() != null ? request.getOrderIndex() : maxOrder + 1;
-
-        ExamSectionType sectionType = parseSectionType(request.getSectionType());
-        ExamSection section = ExamSection.builder()
-                .exam(exam)
-                .name(request.getName().trim())
-                .sectionType(sectionType)
-                .orderIndex(order)
-                .build();
-        section = examSectionRepository.save(section);
-        exam.getSections().add(section);
-
-        return ExamSectionSummaryResponse.builder()
-                .id(section.getId())
-                .name(section.getName())
-                .sectionType(sectionType.name())
-                .orderIndex(section.getOrderIndex())
-                .questionCount(0)
-                .build();
-    }
-
-    @Transactional
-    public ExamSectionSummaryResponse updateSection(Integer examId, Integer sectionId, ExamSectionUpdateRequest request) {
-        Exam exam = examRepository.findById(examId)
-                .orElseThrow(() -> new NotFoundException("Exam", examId));
-        assertOwnerOrAdmin(exam);
-
-        ExamSection section = examSectionRepository.findById(sectionId)
-                .orElseThrow(() -> new NotFoundException("ExamSection", sectionId));
-        if (!section.getExam().getId().equals(examId)) {
-            throw new BadRequestException("Section does not belong to this exam");
-        }
-
-        boolean touched = false;
-        if (request.getName() != null) {
-            if (request.getName().isBlank()) {
-                throw new BadRequestException("Section name cannot be empty");
-            }
-            section.setName(request.getName().trim());
-            touched = true;
-        }
-        if (request.getOrderIndex() != null) {
-            section.setOrderIndex(request.getOrderIndex());
-            touched = true;
-        }
-        if (request.getSectionType() != null && !request.getSectionType().isBlank()) {
-            section.setSectionType(parseSectionType(request.getSectionType()));
-            touched = true;
-        }
-        if (!touched) {
-            throw new BadRequestException("Provide name, orderIndex, and/or sectionType to update");
-        }
-
-        section = examSectionRepository.save(section);
-        return toSectionSummary(section);
-    }
-
-    @Transactional
-    public void deleteSection(Integer examId, Integer sectionId) {
-        Exam exam = examRepository.findById(examId)
-                .orElseThrow(() -> new NotFoundException("Exam", examId));
-        assertOwnerOrAdmin(exam);
-
-        ExamSection section = examSectionRepository.findById(sectionId)
-                .orElseThrow(() -> new NotFoundException("ExamSection", sectionId));
-        if (!section.getExam().getId().equals(examId)) {
-            throw new BadRequestException("Section does not belong to this exam");
-        }
-
-        if (section.getQuestions() != null && !section.getQuestions().isEmpty()) {
-            throw new BadRequestException("Remove or move questions before deleting this section");
-        }
-
-        exam.getSections().remove(section);
-        examSectionRepository.delete(section);
     }
 
     // ─── PRIVATE HELPERS ─────────────────────────────────────────────────────
@@ -372,12 +307,96 @@ public class ExamService {
                                 "Only teachers can create exams."));
     }
 
+    private Teacher resolveTeacherForWrite(Integer requestedTeacherId) {
+        if (requestedTeacherId == null) {
+            throw new BadRequestException("teacherId is required");
+        }
+        if (SecurityUtils.hasRole("ADMIN")) {
+            return teacherRepository.findById(requestedTeacherId)
+                    .orElseThrow(() -> new NotFoundException("Teacher", requestedTeacherId));
+        }
+        if (SecurityUtils.hasRole("TEACHER")) {
+            Teacher current = resolveCurrentTeacher();
+            if (!current.getId().equals(requestedTeacherId)) {
+                throw new ForbiddenException("Teachers can only manage their own exams");
+            }
+            return current;
+        }
+        throw new ForbiddenException("Access denied");
+    }
+
     private ExamSectionType parseSectionType(String raw) {
         try {
             return ExamSectionType.fromString(raw);
         } catch (IllegalArgumentException e) {
             throw new BadRequestException("Invalid sectionType. Use READING, LISTENING, WRITING, or SPEAKING.");
         }
+    }
+
+    private void syncSections(Exam exam, List<ExamSectionRequest> requestedSections) {
+        if (requestedSections == null) {
+            return;
+        }
+        if (exam.getSections() == null) {
+            exam.setSections(new ArrayList<>());
+        }
+        Hibernate.initialize(exam.getSections());
+
+        Map<Integer, ExamSection> existingById = exam.getSections().stream()
+                .filter(section -> section.getId() != null)
+                .collect(Collectors.toMap(ExamSection::getId, section -> section, (a, b) -> a, LinkedHashMap::new));
+        Set<Integer> seenIds = new LinkedHashSet<>();
+        Set<Integer> usedOrders = new LinkedHashSet<>();
+
+        for (int i = 0; i < requestedSections.size(); i++) {
+            ExamSectionRequest request = requestedSections.get(i);
+            if (request == null) {
+                throw new BadRequestException("Section payload cannot be null");
+            }
+            String name = request.getName() == null ? "" : request.getName().trim();
+            if (name.isBlank()) {
+                throw new BadRequestException("Section name cannot be empty");
+            }
+            ExamSectionType sectionType = parseSectionType(request.getSectionType());
+            int orderIndex = request.getOrderIndex() != null ? request.getOrderIndex() : i;
+            if (!usedOrders.add(orderIndex)) {
+                throw new BadRequestException("Section orderIndex must be unique within an exam");
+            }
+
+            ExamSection section;
+            if (request.getId() == null) {
+                section = ExamSection.builder()
+                        .exam(exam)
+                        .questions(new ArrayList<>())
+                        .build();
+                exam.getSections().add(section);
+            } else {
+                if (!seenIds.add(request.getId())) {
+                    throw new BadRequestException("Duplicate section id in request: " + request.getId());
+                }
+                section = existingById.get(request.getId());
+                if (section == null) {
+                    throw new BadRequestException("Section does not belong to this exam: " + request.getId());
+                }
+            }
+
+            section.setName(name);
+            section.setSectionType(sectionType);
+            section.setOrderIndex(orderIndex);
+        }
+
+        List<ExamSection> removed = exam.getSections().stream()
+                .filter(section -> section.getId() != null && !seenIds.contains(section.getId()))
+                .toList();
+        for (ExamSection section : removed) {
+            if (examSectionRepository.countQuestionsBySectionId(section.getId()) > 0) {
+                throw new BadRequestException("Cannot remove section with questions: " + section.getName());
+            }
+        }
+
+        exam.getSections().removeAll(removed);
+        exam.getSections().sort(Comparator.comparing(
+                section -> section.getOrderIndex() != null ? section.getOrderIndex() : Integer.MAX_VALUE));
     }
 
     private static ExamType parseExamType(String raw) {
@@ -408,21 +427,20 @@ public class ExamService {
         if (!"ACTIVE".equalsIgnoreCase(exam.getStatus())) {
             return;
         }
-        List<ExamSection> sections = exam.getSections() != null ? exam.getSections() : List.of();
-        if (sections.isEmpty()) {
+        if (exam.getAllowedClasses() == null || exam.getAllowedClasses().isEmpty()) {
+            throw new BadRequestException("Select at least one allowed class before publishing this exam");
+        }
+        if (exam.getId() == null || examSectionRepository.countByExamId(exam.getId()) == 0) {
             throw new BadRequestException("Add at least one section before publishing this exam");
         }
-        List<String> emptySections = sections.stream()
-                .filter(section -> section.getQuestions() == null || section.getQuestions().isEmpty())
-                .map(ExamSection::getName)
-                .toList();
+        List<String> emptySections = examSectionRepository.findSectionNamesWithoutQuestions(exam.getId());
         if (!emptySections.isEmpty()) {
             throw new BadRequestException("Add at least one question to every section before publishing: "
                     + String.join(", ", emptySections));
         }
     }
 
-    private List<ClassEntity> resolveAllowedClassesForWrite(List<Integer> allowedClassIds) {
+    private List<ClassEntity> resolveAllowedClassesForWrite(List<Integer> allowedClassIds, Teacher examTeacher) {
         if (allowedClassIds == null) {
             return new ArrayList<>();
         }
@@ -436,15 +454,13 @@ public class ExamService {
             throw new BadRequestException("One or more allowedClassIds do not exist");
         }
 
-        if (SecurityUtils.hasRole("TEACHER")) {
-            Integer teacherUserId = SecurityUtils.getCurrentUserId();
-            boolean invalidOwnership = classes.stream()
-                    .anyMatch(c -> c.getTeacher() == null
-                            || c.getTeacher().getUser() == null
-                            || !teacherUserId.equals(c.getTeacher().getUser().getId()));
-            if (invalidOwnership) {
-                throw new ForbiddenException("You can only assign classes that you own");
-            }
+        Integer ownerTeacherId = examTeacher != null ? examTeacher.getId() : null;
+        boolean invalidOwnership = classes.stream()
+                .anyMatch(c -> c.getTeacher() == null
+                        || c.getTeacher().getId() == null
+                        || !c.getTeacher().getId().equals(ownerTeacherId));
+        if (invalidOwnership) {
+            throw new ForbiddenException("You can only assign classes owned by the exam teacher");
         }
 
         return new ArrayList<>(classes);
@@ -560,18 +576,19 @@ public class ExamService {
                 .name(s.getName())
                 .sectionType(s.getSectionType() != null ? s.getSectionType().name() : ExamSectionType.READING.name())
                 .orderIndex(s.getOrderIndex())
-                .questionCount(s.getQuestions() != null ? s.getQuestions().size() : 0)
+                .questionCount((int) examSectionRepository.countQuestionsBySectionId(s.getId()))
                 .build();
     }
 
-    private void initializeListResponseAssociations(List<Exam> exams) {
-        exams.forEach(exam -> {
-            Hibernate.initialize(exam.getSections());
-            for (ExamSection section : exam.getSections()) {
-                Hibernate.initialize(section.getQuestions());
-            }
-            Hibernate.initialize(exam.getAllowedClasses());
-        });
+    private ExamSectionSummaryResponse toSectionSummary(Object[] row) {
+        ExamSectionType sectionType = row[2] instanceof ExamSectionType type ? type : ExamSectionType.READING;
+        return ExamSectionSummaryResponse.builder()
+                .id((Integer) row[0])
+                .name((String) row[1])
+                .sectionType(sectionType.name())
+                .orderIndex((Integer) row[3])
+                .questionCount(((Number) row[4]).intValue())
+                .build();
     }
 
     private List<ExamResponse> toListResponses(List<com.ai.englishsystem.exam.dto.ExamDashboardRow> rows) {
@@ -634,5 +651,18 @@ public class ExamService {
                 Hibernate.initialize(question.getOptions());
             }
         }
+    }
+
+    private TeacherResponse toTeacherOption(Teacher teacher) {
+        var user = teacher.getUser();
+        return TeacherResponse.builder()
+                .id(teacher.getId())
+                .userId(user != null ? user.getId() : null)
+                .teacherCode(teacher.getTeacherCode())
+                .fullName(user != null ? user.getFullName() : null)
+                .email(user != null ? user.getEmail() : null)
+                .department(teacher.getDepartment())
+                .createdAt(teacher.getCreatedAt())
+                .build();
     }
 }

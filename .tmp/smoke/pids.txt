@@ -1,3 +1,0 @@
-backend=31912
-teacher=29464
-student=2208

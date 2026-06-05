@@ -19,6 +19,7 @@ public class StudentResponse {
     private String studentCode;
     private String fullName;
     private String email;
+    private String status;
     private LocalDate dateOfBirth;
     private LocalDateTime createdAt;
 }

@@ -14,6 +14,8 @@ import java.util.Optional;
 public interface AnswerRepository extends JpaRepository<Answer, Integer> {
     List<Answer> findBySubmission(Submission submission);
 
+    List<Answer> findBySubmission_IdIn(List<Integer> submissionIds);
+
     @EntityGraph(attributePaths = {"question", "question.options"})
     @Query("SELECT a FROM Answer a WHERE a.submission = :sub")
     List<Answer> findBySubmissionFetchQuestion(@Param("sub") Submission submission);
@@ -21,6 +23,14 @@ public interface AnswerRepository extends JpaRepository<Answer, Integer> {
     @EntityGraph(attributePaths = {"question", "question.options", "submission"})
     @Query("SELECT a FROM Answer a WHERE a.submission.id IN :submissionIds")
     List<Answer> findBySubmissionIdInFetchQuestion(@Param("submissionIds") List<Integer> submissionIds);
+
+    @EntityGraph(attributePaths = {"question"})
+    @Query("SELECT a FROM Answer a WHERE a.submission = :sub")
+    List<Answer> findBySubmissionFetchQuestionOnly(@Param("sub") Submission submission);
+
+    @EntityGraph(attributePaths = {"question", "submission"})
+    @Query("SELECT a FROM Answer a WHERE a.submission.id IN :submissionIds")
+    List<Answer> findBySubmissionIdInFetchQuestionOnly(@Param("submissionIds") List<Integer> submissionIds);
 
     Optional<Answer> findBySubmissionAndQuestion(Submission submission, Question question);
 

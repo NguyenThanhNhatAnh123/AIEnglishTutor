@@ -150,6 +150,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
             }
             if (count == 1L) {
                 redisTemplate.expire(redisKey, Duration.ofSeconds(windowSeconds));
+            } else {
+                Long ttl = redisTemplate.getExpire(redisKey);
+                if (ttl != null && ttl < 0) {
+                    redisTemplate.expire(redisKey, Duration.ofSeconds(windowSeconds));
+                }
             }
             return count > maxRequests;
         } catch (Exception ex) {

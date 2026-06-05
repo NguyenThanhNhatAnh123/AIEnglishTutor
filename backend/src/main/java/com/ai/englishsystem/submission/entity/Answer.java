@@ -38,6 +38,10 @@ public class Answer {
     @Column(name = "answer_text", columnDefinition = "TEXT")
     private String answerText;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "answer_type")
+    private AnswerType answerType;
+
     @Column(name = "selected_option_id")
     private Integer selectedOptionId;
 

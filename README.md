@@ -50,9 +50,6 @@ Copy-Item backend\.env.example backend\.env
 Minimum useful values:
 
 ```env
-APP_DB_URL=jdbc:mysql://localhost:3306/ai_english_exam?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-APP_DB_USERNAME=root
-APP_DB_PASSWORD=change_me
 APP_JWT_SECRET=replace_with_a_long_random_secret_at_least_64_bytes
 APP_REDIS_PASSWORD=replace_with_redis_password
 APP_DEEPSEEK_API_KEY=
@@ -127,6 +124,10 @@ Default local URLs:
 Copy-Item backend\.env.example backend\.env
 docker compose up -d --build
 ```
+
+The Compose stack starts MySQL, Redis, backend, learningservice, aiservice,
+Nginx, and Prometheus. MySQL is exposed on `${MYSQL_HOST_PORT:-3307}` and is
+used internally through `mysql:3306`.
 
 The Nginx gateway is exposed at:
 

@@ -1,466 +1,34 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { studentExamApi, speakingApi, aiApi, API_ORIGIN } from '../services/api';
+import { studentExamApi, speakingApi } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import Modal from '../components/common/Modal';
 import Button from '../components/common/Button';
 import ExamTimer from '../components/ExamTimer';
-import AudioPlayer from '../../../packages/ui/AudioPlayer.jsx';
-import SpeakingRecorder from '../components/exam/SpeakingRecorder.jsx';
+import { QuestionBlock } from '../features/exam/components/QuestionControls';
+import { QuestionNav, QuestionStrip } from '../features/exam/components/QuestionNavigation';
+import { WaitingCheck } from '../features/exam/components/WaitingCheck';
+import {
+  clearLocalDraft,
+  deleteSpeakingDraftBlob,
+  draftKeyFor,
+  examRoomBackground,
+  hasAnyAudioPrompt,
+  hasAnyQuestion,
+  initialAnalytics,
+  isAnswered,
+  readLocalDraft,
+  resolveSubmissionStartEpochMs,
+  restoreSpeakingDraftBlobs,
+  saveSpeakingDraftBlob,
+  sectionQuestionCount,
+  serializeDraftAnswers,
+  statusTone,
+} from '../features/exam/examUtils';
 import examRoomMainBg from '../assets/exam/backgrounds/exam-room-main-bg.jpg';
 import examRoomStatCardBg from '../assets/exam/backgrounds/exam-room-stat-card-bg.jpg';
 import examRoomPanelBg from '../assets/exam/backgrounds/exam-room-panel-bg.jpg';
 
-function resolveAudioSrc(url) {
-  if (!url) return null;
-  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) return url;
-  return `${API_ORIGIN}${url.startsWith('/') ? '' : '/'}${url}`;
-}
-
-function examRoomBackground(image, overlay = 'rgba(255,255,255,0.92)') {
-  return {
-    backgroundImage: `linear-gradient(90deg, ${overlay}, rgba(255,255,255,0.7)), url(${image})`,
-    backgroundSize: 'cover',
-    backgroundPosition: 'center',
-  };
-}
-
-function detectDeviceType() {
-  if (typeof navigator === 'undefined') return 'UNKNOWN';
-  const ua = (navigator.userAgent || '').toLowerCase();
-  if (/(ipad|tablet)/.test(ua) || (/android/.test(ua) && !/mobile/.test(ua))) return 'TABLET';
-  if (/(mobi|iphone|ipod|android)/.test(ua)) return 'MOBILE';
-  return 'DESKTOP';
-}
-
-function initialAnalytics() {
-  const ua = typeof navigator === 'undefined' ? '' : (navigator.userAgent || '');
-  return {
-    tabSwitchCount: 0,
-    focusLossCount: 0,
-    copyPasteCount: 0,
-    suspiciousEventCount: 0,
-    deviceType: detectDeviceType(),
-    deviceLabel: ua.slice(0, 255),
-  };
-}
-
-function resolveSubmissionStartEpochMs(submission) {
-  if (!submission) return null;
-  if (submission.deadlineEpochMs != null && submission.durationMinutes != null) {
-    const fromDeadline = Number(submission.deadlineEpochMs) - Number(submission.durationMinutes) * 60_000;
-    if (Number.isFinite(fromDeadline)) return fromDeadline;
-  }
-  if (submission.startTime) {
-    const parsed = new Date(submission.startTime).getTime();
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-  return null;
-}
-
-const DRAFT_KEY_PREFIX = 'exam_draft_v1';
-const AUDIO_DRAFT_DB = 'exam_audio_drafts_v1';
-const AUDIO_DRAFT_STORE = 'recordings';
-
-function draftKeyFor(submissionId) {
-  return submissionId ? `${DRAFT_KEY_PREFIX}_${submissionId}` : null;
-}
-
-function serializeDraftAnswers(answers) {
-  const serialized = {};
-  Object.entries(answers || {}).forEach(([questionId, answer]) => {
-    if (!answer) return;
-    serialized[questionId] = {
-      answerText: answer.answerText,
-      selectedOptionId: answer.selectedOptionId,
-      speakingAudioUrl: answer.speakingAudioUrl,
-      speakingDurationSeconds: answer.speakingDurationSeconds,
-      speakingFormat: answer.speakingFormat,
-      imageUrl: answer.imageUrl,
-      localUpdatedAt: answer.localUpdatedAt,
-      hasUnsavedSpeakingBlob: answer.speakingBlob instanceof Blob,
-    };
-  });
-  return serialized;
-}
-
-function readLocalDraft(submissionId) {
-  const key = draftKeyFor(submissionId);
-  if (!key) return {};
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function clearLocalDraft(submissionId) {
-  const key = draftKeyFor(submissionId);
-  if (key) localStorage.removeItem(key);
-}
-
-function speakingDraftKey(submissionId, questionId) {
-  return `${submissionId}:${questionId}`;
-}
-
-function openAudioDraftDb() {
-  if (typeof indexedDB === 'undefined') return Promise.resolve(null);
-  return new Promise((resolve) => {
-    const request = indexedDB.open(AUDIO_DRAFT_DB, 1);
-    request.onupgradeneeded = () => {
-      request.result.createObjectStore(AUDIO_DRAFT_STORE);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => resolve(null);
-  });
-}
-
-async function saveSpeakingDraftBlob(submissionId, questionId, blob) {
-  if (!(blob instanceof Blob)) return;
-  const db = await openAudioDraftDb();
-  if (!db) return;
-  await new Promise((resolve) => {
-    const tx = db.transaction(AUDIO_DRAFT_STORE, 'readwrite');
-    tx.objectStore(AUDIO_DRAFT_STORE).put(blob, speakingDraftKey(submissionId, questionId));
-    tx.oncomplete = resolve;
-    tx.onerror = resolve;
-  });
-  db.close();
-}
-
-async function readSpeakingDraftBlob(submissionId, questionId) {
-  const db = await openAudioDraftDb();
-  if (!db) return null;
-  const blob = await new Promise((resolve) => {
-    const tx = db.transaction(AUDIO_DRAFT_STORE, 'readonly');
-    const request = tx.objectStore(AUDIO_DRAFT_STORE).get(speakingDraftKey(submissionId, questionId));
-    request.onsuccess = () => resolve(request.result instanceof Blob ? request.result : null);
-    request.onerror = () => resolve(null);
-  });
-  db.close();
-  return blob;
-}
-
-async function deleteSpeakingDraftBlob(submissionId, questionId) {
-  const db = await openAudioDraftDb();
-  if (!db) return;
-  await new Promise((resolve) => {
-    const tx = db.transaction(AUDIO_DRAFT_STORE, 'readwrite');
-    tx.objectStore(AUDIO_DRAFT_STORE).delete(speakingDraftKey(submissionId, questionId));
-    tx.oncomplete = resolve;
-    tx.onerror = resolve;
-  });
-  db.close();
-}
-
-async function restoreSpeakingDraftBlobs(submissionId, answerMap, questions) {
-  const next = { ...answerMap };
-  let restoredCount = 0;
-  for (const question of questions) {
-    if ((question?.questionType || '').toUpperCase() !== 'SPEAKING') continue;
-    const blob = await readSpeakingDraftBlob(submissionId, question.id);
-    if (!blob) continue;
-    next[question.id] = {
-      ...(next[question.id] || {}),
-      speakingBlob: blob,
-      speakingAudioUrl: next[question.id]?.speakingAudioUrl,
-      speakingFormat: next[question.id]?.speakingFormat || blob.type || 'audio/webm',
-    };
-    restoredCount += 1;
-  }
-  return { answers: next, restoredCount };
-}
-
-/* ─── Question navigation sidebar ──────────────────────────────────────── */
-function QuestionNav({ questions, answers, current, onSelect, disabled }) {
-  return (
-    <nav className="w-56 shrink-0 hidden lg:block" aria-label="Question navigation">
-      <div className="card sticky top-4 dark:bg-slate-900 dark:border-slate-700">
-        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">
-          Questions
-        </p>
-        <div className="grid grid-cols-5 gap-1.5">
-          {questions.map((q, idx) => {
-            const answered = isAnswered(q, answers[q.id]);
-            const isCurrent = current === q.id;
-            return (
-              <button
-                key={q.id}
-                type="button"
-                onClick={() => onSelect(q.id, idx)}
-                disabled={disabled}
-                aria-label={`Question ${idx + 1}${answered ? ' (answered)' : ''}`}
-                aria-current={isCurrent ? 'step' : undefined}
-                className={`w-8 h-8 rounded-lg text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
-                  isCurrent
-                    ? 'bg-blue-600 text-white ring-2 ring-blue-400 ring-offset-1 dark:ring-offset-slate-900'
-                    : answered
-                      ? 'bg-green-500 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-600 dark:bg-slate-800 dark:text-slate-300'
-                } disabled:cursor-not-allowed disabled:opacity-60`}
-              >
-                {idx + 1}
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-4 space-y-1.5">
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className="w-3 h-3 rounded-sm bg-green-500 inline-block" /> Answered
-          </div>
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className="w-3 h-3 rounded-sm bg-slate-200 dark:bg-slate-600 inline-block" /> Not answered
-          </div>
-        </div>
-      </div>
-    </nav>
-  );
-}
-
-/* ─── Answer type detection ────────────────────────────────────────────── */
-function QuestionStrip({ questions, answers, current, onSelect, disabled }) {
-  return (
-    <div className="lg:hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-          Questions
-        </p>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          {questions.filter((q) => isAnswered(q, answers[q.id])).length}/{questions.length} answered
-        </p>
-      </div>
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {questions.map((q, idx) => {
-          const answered = isAnswered(q, answers[q.id]);
-          const isCurrent = current === q.id;
-          return (
-            <button
-              key={q.id}
-              type="button"
-              onClick={() => onSelect(q.id, idx)}
-              disabled={disabled}
-              aria-label={`Question ${idx + 1}${answered ? ' (answered)' : ''}`}
-              aria-current={isCurrent ? 'step' : undefined}
-              className={`h-9 min-w-9 rounded-lg px-3 text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
-                isCurrent
-                  ? 'bg-blue-600 text-white'
-                  : answered
-                    ? 'bg-green-500 text-white'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-              } disabled:cursor-not-allowed disabled:opacity-60`}
-            >
-              {idx + 1}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function isAnswered(question, value) {
-  if (!value) return false;
-  const type = question?.questionType?.toUpperCase() || '';
-  switch (type) {
-    case 'MULTIPLE_CHOICE':
-    case 'LISTENING':
-      return value.selectedOptionId != null;
-    case 'WRITING':
-      return typeof value.answerText === 'string' && value.answerText.trim().length > 0;
-    case 'SPEAKING': {
-      const u = value.speakingAudioUrl;
-      const hasUploaded = typeof u === 'string' && u.length > 0 && !u.startsWith('blob:');
-      const hasLocal = value.speakingBlob instanceof Blob;
-      return hasUploaded || hasLocal;
-    }
-    default:
-      return !!(value.selectedOptionId || value.answerText || value.speakingAudioUrl);
-  }
-}
-
-/* ─── MCQ component ────────────────────────────────────────────────────── */
-function MCQuestion({ question, value, onChange, disabled }) {
-  return (
-    <div className="space-y-2" role="radiogroup" aria-label="Answer options">
-      {question.options?.map((opt) => (
-        <label
-          key={opt.id}
-          className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all focus-within:ring-2 focus-within:ring-blue-400 ${
-            value?.selectedOptionId === opt.id
-              ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-400'
-              : 'border-slate-200 hover:border-blue-300 bg-white dark:bg-slate-800 dark:border-slate-600'
-          } ${disabled ? 'cursor-not-allowed opacity-70' : ''}`}
-        >
-          <input
-            type="radio"
-            name={`q-${question.id}`}
-            checked={value?.selectedOptionId === opt.id}
-            onChange={() => onChange({ selectedOptionId: opt.id })}
-            disabled={disabled}
-            className="w-4 h-4 text-blue-600 accent-blue-600"
-          />
-          <span className="text-sm text-slate-700 dark:text-slate-200">{opt.optionText}</span>
-        </label>
-      ))}
-    </div>
-  );
-}
-
-/* ─── Writing component ────────────────────────────────────────────────── */
-function WritingQuestion({ value, onChange, toast, disabled }) {
-  const [processing, setProcessing] = useState(false);
-
-  const onPickImage = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    try {
-      setProcessing(true);
-      const res = await aiApi.imageOcrTts(file);
-      const data = res.data?.data || {};
-      onChange({
-        imageUrl: data.imageUrl || undefined,
-        answerText: data.extractedText || value?.answerText || '',
-        speakingAudioUrl: data.audioUrl || undefined,
-        speakingFormat: data.audioUrl ? 'mp3' : value?.speakingFormat,
-      });
-      toast.info('Image OCR + TTS completed.');
-    } catch (e) {
-      toast.error(e.response?.data?.message || 'Failed to process image.');
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const generatedAudioSrc = resolveAudioSrc(value?.speakingAudioUrl);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="text-xs px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-600 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/jpg,image/webp"
-            onChange={onPickImage}
-            disabled={disabled || processing}
-            className="hidden"
-          />
-          {processing ? 'Processing image...' : 'Upload image for OCR + TTS'}
-        </label>
-        {value?.imageUrl && (
-          <a
-            href={resolveAudioSrc(value.imageUrl)}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-blue-600 hover:underline"
-          >
-            View uploaded image
-          </a>
-        )}
-      </div>
-      {generatedAudioSrc && (
-        <AudioPlayer src={generatedAudioSrc} disabled={disabled} className="max-w-md" />
-      )}
-      <textarea
-        value={value?.answerText || ''}
-        onChange={(e) => onChange({ answerText: e.target.value })}
-        placeholder="Write your answer here..."
-        rows={8}
-        aria-label="Your written answer"
-        disabled={disabled}
-        className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y disabled:opacity-60"
-      />
-    </div>
-  );
-}
-
-function sectionQuestionCount(sections) {
-  return (sections || []).reduce((acc, s) => acc + ((s.questions || []).length), 0);
-}
-
-function questionType(question) {
-  return (question?.questionType || '').trim().toUpperCase();
-}
-
-function hasAnyQuestion(questions, type) {
-  return questions.some((q) => questionType(q) === type);
-}
-
-function hasAnyAudioPrompt(questions) {
-  return questions.some((q) => questionType(q) === 'LISTENING' || q.listeningAudioUrl || q.audioUrl);
-}
-
-function statusTone(ok, waiting = false) {
-  if (ok) return 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-100';
-  if (waiting) return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200';
-  return 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100';
-}
-
-function WaitingCheck({ label, detail, ok, waiting, action }) {
-  return (
-    <div
-      className={`rounded-xl border p-4 ${statusTone(ok, waiting)}`}
-      style={examRoomBackground(examRoomStatCardBg, ok ? 'rgba(236,253,245,0.94)' : waiting ? 'rgba(248,250,252,0.94)' : 'rgba(255,251,235,0.94)')}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-bold">{label}</p>
-          <p className="mt-1 text-xs leading-relaxed opacity-80">{detail}</p>
-        </div>
-        <span className="shrink-0 rounded-full bg-white/70 px-2 py-1 text-[11px] font-bold dark:bg-slate-900/60">
-          {ok ? 'Ready' : waiting ? 'Optional' : 'Needed'}
-        </span>
-      </div>
-      {action && <div className="mt-3">{action}</div>}
-    </div>
-  );
-}
-
-/* ─── Question block ───────────────────────────────────────────────────── */
-function QuestionBlock({ question, value, onChange, toast, interactionLocked, submissionId }) {
-  const type = question.questionType?.toUpperCase();
-  const promptSrc = resolveAudioSrc(question.listeningAudioUrl || question.audioUrl);
-  return (
-    <div className="card dark:bg-slate-900 dark:border-slate-700">
-      <p className="text-xs font-semibold text-blue-500 dark:text-blue-400 uppercase tracking-wider mb-1">
-        {type?.replace(/_/g, ' ')}
-      </p>
-      {promptSrc && (
-        <div className="mb-4 space-y-2">
-          <AudioPlayer src={promptSrc} disabled={interactionLocked} className="max-w-2xl" />
-        </div>
-      )}
-      <p className="text-slate-800 dark:text-slate-100 font-medium mb-4">{question.questionText}</p>
-      <p className="text-xs text-slate-400 mb-4">
-        {question.points} pt{question.points !== 1 ? 's' : ''}
-      </p>
-      {(type === 'MULTIPLE_CHOICE' || type === 'LISTENING') && (
-        <MCQuestion question={question} value={value} onChange={onChange} disabled={interactionLocked} />
-      )}
-      {type === 'WRITING' && (
-        <WritingQuestion
-          value={value}
-          onChange={onChange}
-          toast={toast}
-          disabled={interactionLocked}
-        />
-      )}
-      {type === 'SPEAKING' && submissionId != null && (
-        <SpeakingRecorder
-          submissionId={submissionId}
-          questionId={question.id}
-          instructionAudioUrl={question.listeningAudioUrl || question.audioUrl}
-          disabled={interactionLocked}
-          value={value}
-          onChange={onChange}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ─── Main Exam Page ───────────────────────────────────────────────────── */
 export default function ExamPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -769,24 +337,23 @@ export default function ExamPage() {
     if (!submission) return;
     const entries = Object.entries(answerSnapshot).filter(([, data]) => data);
     setSaveState('saving');
-    const results = await Promise.allSettled(
-      entries.map(([qId, data]) =>
-        studentExamApi.saveAnswer({
-          submissionId: submission.id,
-          questionId: parseInt(qId, 10),
-          answerText: data.answerText ?? undefined,
-          selectedOptionId: data.selectedOptionId ?? undefined,
-          speakingAudioUrl: data.speakingAudioUrl ?? undefined,
-          speakingDurationSeconds: data.speakingDurationSeconds ?? undefined,
-          speakingFormat: data.speakingFormat ?? undefined,
-          imageUrl: data.imageUrl ?? undefined,
-        })
-      )
-    );
-    const failed = results.filter((r) => r.status === 'rejected');
-    if (failed.length > 0) {
+    const payload = entries.map(([qId, data]) => ({
+      submissionId: submission.id,
+      questionId: parseInt(qId, 10),
+      answerText: data.answerText ?? undefined,
+      selectedOptionId: data.selectedOptionId ?? undefined,
+      speakingAudioUrl: data.speakingAudioUrl ?? undefined,
+      speakingDurationSeconds: data.speakingDurationSeconds ?? undefined,
+      speakingFormat: data.speakingFormat ?? undefined,
+      imageUrl: data.imageUrl ?? undefined,
+    }));
+    try {
+      if (payload.length > 0) {
+        await studentExamApi.saveAnswersBatch(payload);
+      }
+    } catch {
       setSaveState('error');
-      throw new Error(`Could not save ${failed.length} answer(s). Please retry before submitting.`);
+      throw new Error('Could not save answers. Please retry before submitting.');
     }
     dirtyAnswerIdsRef.current.clear();
     setSaveState('saved');
@@ -839,7 +406,7 @@ export default function ExamPage() {
   const doSubmit = useCallback(async (force = false) => {
     if (!submission || submittingRef.current) return;
 
-    // Cancel any pending debounced save before flushing (Bug fix: LOW-05)
+    // Cancel pending debounced saves before the final flush.
     saveTimersRef.current.forEach((timerId) => clearTimeout(timerId));
     saveTimersRef.current.clear();
 

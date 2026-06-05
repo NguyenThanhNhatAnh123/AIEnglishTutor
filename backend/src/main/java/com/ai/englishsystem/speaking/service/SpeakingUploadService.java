@@ -15,6 +15,7 @@ import com.ai.englishsystem.speaking.dto.SpeakingUploadResponse;
 import com.ai.englishsystem.student.entity.Student;
 import com.ai.englishsystem.student.repository.StudentRepository;
 import com.ai.englishsystem.submission.entity.Answer;
+import com.ai.englishsystem.submission.entity.AnswerType;
 import com.ai.englishsystem.submission.entity.Submission;
 import com.ai.englishsystem.submission.entity.SubmissionStatus;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
@@ -93,6 +94,7 @@ public class SpeakingUploadService {
         if (!submission.getStudent().getId().equals(student.getId())) {
             throw new ForbiddenException("Cannot upload for another student's submission");
         }
+        studentExamService.assertStudentCanAccessExam(student, submission.getExam().getId());
         if (submission.getStatus() != SubmissionStatus.IN_PROGRESS) {
             throw new BadRequestException("Submission is not in progress");
         }
@@ -168,12 +170,20 @@ public class SpeakingUploadService {
     private String persistSpeakingAnswer(Submission submission, Question question, String url, int duration) {
         Submission lockedSubmission = submissionRepository.findWithAssociationsByIdForUpdate(submission.getId())
                 .orElseThrow(() -> new NotFoundException("Submission", submission.getId()));
+        if (lockedSubmission.getStatus() != SubmissionStatus.IN_PROGRESS) {
+            throw new BadRequestException("Submission is not in progress");
+        }
+        assertWithinUploadWindow(lockedSubmission);
+        if (!questionBelongsToExam(question, lockedSubmission)) {
+            throw new BadRequestException("Question does not belong to this exam");
+        }
         Answer answer = answerRepository.findBySubmissionAndQuestion(lockedSubmission, question)
                 .orElseGet(() -> Answer.builder()
                         .submission(lockedSubmission)
                         .question(question)
                         .build());
         String previousUrl = answer.getSpeakingAudioUrl();
+        answer.setAnswerType(AnswerType.AUDIO);
         answer.setSpeakingAudioUrl(url);
         answer.setSpeakingDurationSeconds(duration);
         answer.setSpeakingFormat("mp3");

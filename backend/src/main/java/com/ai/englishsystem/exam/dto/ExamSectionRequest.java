@@ -12,6 +12,9 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ExamSectionRequest {
 
+    /** Present when updating an existing section through the exam aggregate endpoint. */
+    private Integer id;
+
     @NotBlank(message = "Section name is required")
     private String name;
 

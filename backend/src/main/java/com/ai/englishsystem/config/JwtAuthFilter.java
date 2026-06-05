@@ -1,5 +1,6 @@
 package com.ai.englishsystem.config;
 
+import com.ai.englishsystem.user.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,6 +23,7 @@ import java.util.Collections;
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final UserRepository userRepository;
 
     @Override
     protected void doFilterInternal(
@@ -35,6 +37,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             if (StringUtils.hasText(jwt) && jwtService.isTokenValid(jwt)) {
                 String userId = jwtService.extractUserId(jwt);
                 String role = jwtService.extractRole(jwt);
+                Integer parsedUserId = Integer.valueOf(userId);
+                boolean active = userRepository.findById(parsedUserId)
+                        .map(user -> "ACTIVE".equalsIgnoreCase(user.getStatus()))
+                        .orElse(false);
+                if (!active) {
+                    filterChain.doFilter(request, response);
+                    return;
+                }
 
                 var authorities = Collections.singletonList(new SimpleGrantedAuthority("ROLE_" + role));
                 var authentication = new UsernamePasswordAuthenticationToken(

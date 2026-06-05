@@ -3,6 +3,7 @@ package com.ai.englishsystem.exam.controller;
 import com.ai.englishsystem.common.dto.ApiResponse;
 import com.ai.englishsystem.exam.dto.ExamRequest;
 import com.ai.englishsystem.exam.dto.ExamResponse;
+import com.ai.englishsystem.exam.dto.ExamWorkspaceResponse;
 import com.ai.englishsystem.exam.service.ExamService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,12 @@ public class ExamController {
     @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<ApiResponse<List<ExamResponse>>> getAll() {
         return ResponseEntity.ok(ApiResponse.success(examService.findAll()));
+    }
+
+    @GetMapping("/workspace")
+    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
+    public ResponseEntity<ApiResponse<ExamWorkspaceResponse>> workspace() {
+        return ResponseEntity.ok(ApiResponse.success(examService.workspace()));
     }
 
     // Full exam payload may include correct MCQ keys — not exposed to students (use /api/student/exams/{id})
@@ -71,4 +78,5 @@ public class ExamController {
         examService.delete(id);
         return ResponseEntity.noContent().build();
     }
+
 }

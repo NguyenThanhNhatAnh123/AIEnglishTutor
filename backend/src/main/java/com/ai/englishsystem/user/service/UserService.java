@@ -7,6 +7,8 @@ import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
 import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.config.CacheNames;
+import com.ai.englishsystem.student.entity.Student;
+import com.ai.englishsystem.student.repository.StudentRepository;
 import com.ai.englishsystem.user.dto.UserRequest;
 import com.ai.englishsystem.user.dto.UserResponse;
 import com.ai.englishsystem.user.entity.User;
@@ -29,6 +31,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
+    private final StudentRepository studentRepository;
     private final PasswordEncoder passwordEncoder;
 
     @Transactional(readOnly = true)
@@ -85,6 +88,7 @@ public class UserService {
 
         try {
             user = userRepository.save(user);
+            createStudentProfileIfNeeded(user);
         } catch (DataIntegrityViolationException ex) {
             throw new BadRequestException("Email or username already exists");
         }
@@ -132,5 +136,18 @@ public class UserService {
                 .status(user.getStatus())
                 .createdAt(user.getCreatedAt())
                 .build();
+    }
+
+    private void createStudentProfileIfNeeded(User user) {
+        if (user.getRole() == null || !"STUDENT".equalsIgnoreCase(user.getRole().getName())) {
+            return;
+        }
+        if (studentRepository.findByUser(user).isPresent()) {
+            return;
+        }
+        studentRepository.save(Student.builder()
+                .user(user)
+                .studentCode("STU-" + user.getId() + "-" + System.currentTimeMillis())
+                .build());
     }
 }

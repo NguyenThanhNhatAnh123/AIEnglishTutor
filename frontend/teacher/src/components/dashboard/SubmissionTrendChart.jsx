@@ -14,7 +14,7 @@ function CustomTooltip({ active, payload, label }) {
     <div className="rounded-lg border border-white/80 bg-white/95 px-3 py-2 text-sm shadow-panel">
       <p className="font-semibold text-slate-900">{label}</p>
       <p className="mt-1 text-slate-500">
-        <span className="font-bold text-indigo-600">{payload[0].value}</span> attempts
+        <span className="font-bold text-indigo-600">{payload[0].value}</span> lần làm
       </p>
     </div>
   );
@@ -22,7 +22,7 @@ function CustomTooltip({ active, payload, label }) {
 
 export default function SubmissionTrendChart({ data }) {
   if (!data.length) {
-    return <div className="flex h-72 items-center justify-center text-sm text-slate-500">No submission activity yet.</div>;
+    return <div className="flex h-72 items-center justify-center text-sm text-slate-500">Chưa có hoạt động nộp bài.</div>;
   }
 
   return (

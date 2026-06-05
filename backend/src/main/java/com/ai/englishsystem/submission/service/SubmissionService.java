@@ -8,7 +8,6 @@ import com.ai.englishsystem.common.security.AccessControlService;
 import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.exam.entity.Exam;
 import com.ai.englishsystem.exam.repository.ExamRepository;
-import com.ai.englishsystem.exam.service.StudentExamService;
 import com.ai.englishsystem.result.entity.Score;
 import com.ai.englishsystem.result.entity.Feedback;
 import com.ai.englishsystem.result.entity.WritingReviewStatus;
@@ -17,14 +16,14 @@ import com.ai.englishsystem.result.repository.ScoreRepository;
 import com.ai.englishsystem.speaking.service.SpeakingFileStorage;
 import com.ai.englishsystem.student.entity.Student;
 import com.ai.englishsystem.student.repository.StudentRepository;
-import com.ai.englishsystem.submission.dto.StartSubmissionRequest;
 import com.ai.englishsystem.submission.dto.SubmissionListResponse;
 import com.ai.englishsystem.submission.dto.SubmissionResponse;
-import com.ai.englishsystem.submission.dto.SubmitExamRequest;
-import com.ai.englishsystem.submission.dto.SubmitSubmissionRequest;
+import com.ai.englishsystem.submission.dto.SubmissionWorkspaceResponse;
 import com.ai.englishsystem.submission.entity.Answer;
 import com.ai.englishsystem.submission.entity.Submission;
 import com.ai.englishsystem.submission.entity.SubmissionStatus;
+import com.ai.englishsystem.submission.mapper.SubmissionMapper;
+import com.ai.englishsystem.submission.mapper.SubmissionReviewSummary;
 import com.ai.englishsystem.submission.repository.AnswerRepository;
 import com.ai.englishsystem.submission.repository.SubmissionRepository;
 import com.ai.englishsystem.submission.repository.SubmissionSuspiciousEventRepository;
@@ -51,7 +50,6 @@ public class SubmissionService {
 
     private final SubmissionRepository submissionRepository;
     private final ExamRepository examRepository;
-    private final StudentExamService studentExamService;
     private final StudentRepository studentRepository;
     private final ScoreRepository scoreRepository;
     private final AnswerRepository answerRepository;
@@ -60,40 +58,8 @@ public class SubmissionService {
     private final SpeakingFileStorage speakingFileStorage;
     private final SubmissionSuspiciousEventRepository submissionSuspiciousEventRepository;
     private final AccessControlService accessControlService;
-
-    @Transactional
-    public SubmissionResponse start(StartSubmissionRequest request) {
-        return studentExamService.startExam(request.getExamId());
-    }
-
-    @Transactional
-    public SubmissionResponse submit(SubmitSubmissionRequest request) {
-        var graded = studentExamService.submitExam(
-                request.getSubmissionId(),
-                SubmitExamRequest.builder()
-                        .clientTimeSpentSeconds(request.getClientTimeSpentSeconds())
-                        .tabSwitchCount(request.getTabSwitchCount())
-                        .focusLossCount(request.getFocusLossCount())
-                        .copyPasteCount(request.getCopyPasteCount())
-                        .suspiciousEventCount(request.getSuspiciousEventCount())
-                        .deviceType(request.getDeviceType())
-                        .deviceLabel(request.getDeviceLabel())
-                        .build());
-        Submission persisted = submissionRepository.findWithAssociationsById(graded.getSubmissionId())
-                .orElse(null);
-        return SubmissionResponse.builder()
-                .id(graded.getSubmissionId())
-                .examId(graded.getExamId())
-                .studentId(graded.getStudentId())
-                .attemptId(persisted != null && persisted.getExamAttempt() != null
-                        ? persisted.getExamAttempt().getId() : null)
-                .durationMinutes(persisted != null && persisted.getExam() != null
-                        ? persisted.getExam().getDurationMinutes() : null)
-                .startTime(persisted != null ? persisted.getStartTime() : null)
-                .submitTime(graded.getSubmitTime())
-                .status(graded.getStatus())
-                .build();
-    }
+    private final SubmissionMapper submissionMapper;
+    private final AnswerService answerService;
 
     /**
      * Teacher/Admin: list submissions for a given exam.
@@ -123,8 +89,21 @@ public class SubmissionService {
                 ));
 
         return submissions.stream()
-                .map(s -> toListResponse(s, scoreBySubmissionId.get(s.getId())))
+                .map(s -> submissionMapper.toListResponse(s, scoreBySubmissionId.get(s.getId())))
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public SubmissionWorkspaceResponse workspaceByExam(Integer examId) {
+        List<SubmissionListResponse> submissions = listByExam(examId);
+        List<Integer> submissionIds = submissions.stream()
+                .map(SubmissionListResponse::getId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        return SubmissionWorkspaceResponse.builder()
+                .submissions(submissions)
+                .answersBySubmissionId(answerService.getAnswersForTeacherBatch(submissionIds))
+                .build();
     }
 
     /**
@@ -139,7 +118,7 @@ public class SubmissionService {
         List<Submission> submissions = submissionRepository.findByStudentOrderByStartTimeDesc(student);
         List<Integer> submissionIds = submissions.stream().map(Submission::getId).toList();
 
-        // Batch load scores to avoid N+1 (Bug fix: LOW-04)
+        // Batch load scores to avoid N+1 queries.
         Map<Integer, Float> scoreBySubmissionId = scoreRepository.findBySubmissionIn(submissions).stream()
                 .collect(Collectors.toMap(
                         sc -> sc.getSubmission().getId(),
@@ -147,12 +126,12 @@ public class SubmissionService {
                         (a, b) -> a // pick first if duplicate
                 ));
 
-        Map<Integer, SubmissionReviewOverview> reviewBySubmissionId = resolveReviewOverview(submissionIds);
+        Map<Integer, SubmissionReviewSummary> reviewBySubmissionId = resolveReviewOverview(submissionIds);
 
         return submissions.stream()
                 .map(s -> {
-                    SubmissionReviewOverview overview = reviewBySubmissionId.getOrDefault(s.getId(), SubmissionReviewOverview.empty());
-                    return toListResponse(s, resolveStudentVisibleTotalScore(s, scoreBySubmissionId, overview), overview);
+                    SubmissionReviewSummary overview = reviewBySubmissionId.getOrDefault(s.getId(), SubmissionReviewSummary.empty());
+                    return submissionMapper.toListResponse(s, resolveStudentVisibleTotalScore(s, scoreBySubmissionId, overview), overview);
                 })
                 .collect(Collectors.toList());
     }
@@ -160,7 +139,7 @@ public class SubmissionService {
     private Float resolveStudentVisibleTotalScore(
             Submission s,
             Map<Integer, Float> scoreMap,
-            SubmissionReviewOverview overview
+            SubmissionReviewSummary overview
     ) {
         if (s.getStatus() == SubmissionStatus.IN_PROGRESS) {
             return null;
@@ -171,12 +150,12 @@ public class SubmissionService {
         return scoreMap.get(s.getId());
     }
 
-    private Map<Integer, SubmissionReviewOverview> resolveReviewOverview(List<Integer> submissionIds) {
+    private Map<Integer, SubmissionReviewSummary> resolveReviewOverview(List<Integer> submissionIds) {
         if (submissionIds == null || submissionIds.isEmpty()) {
             return Map.of();
         }
 
-        List<Answer> answers = answerRepository.findBySubmissionIdInFetchQuestion(submissionIds);
+        List<Answer> answers = answerRepository.findBySubmissionIdInFetchQuestionOnly(submissionIds);
         Map<Integer, Feedback> feedbackByAnswerId = feedbackRepository.findByAnswerIn(answers).stream()
                 .filter(feedback -> feedback.getAnswer() != null && feedback.getAnswer().getId() != null)
                 .collect(Collectors.toMap(feedback -> feedback.getAnswer().getId(), Function.identity()));
@@ -191,7 +170,7 @@ public class SubmissionService {
                 ));
     }
 
-    private SubmissionReviewOverview reviewOverview(List<Answer> answers, Map<Integer, Feedback> feedbackByAnswerId) {
+    private SubmissionReviewSummary reviewOverview(List<Answer> answers, Map<Integer, Feedback> feedbackByAnswerId) {
         int writingTotal = 0;
         int writingPublished = 0;
         int speakingTotal = 0;
@@ -214,7 +193,7 @@ public class SubmissionService {
             }
         }
 
-        return new SubmissionReviewOverview(writingTotal, writingPublished, speakingTotal, speakingPublished);
+        return new SubmissionReviewSummary(writingTotal, writingPublished, speakingTotal, speakingPublished);
     }
 
     /**
@@ -258,41 +237,6 @@ public class SubmissionService {
                 .build();
     }
 
-    private SubmissionListResponse toListResponse(Submission s, Float totalScore) {
-        return toListResponse(s, totalScore, SubmissionReviewOverview.empty());
-    }
-
-    private SubmissionListResponse toListResponse(Submission s, Float totalScore, SubmissionReviewOverview review) {
-        LocalDateTime end = s.getEndTime() != null ? s.getEndTime() : s.getSubmitTime();
-        return SubmissionListResponse.builder()
-                .id(s.getId())
-                .examId(s.getExam().getId())
-                .examTitle(s.getExam().getTitle())
-                .studentId(s.getStudent().getId())
-                .studentName(s.getStudent().getUser().getFullName())
-                .status(s.getStatus().name())
-                .startTime(s.getStartTime())
-                .submitTime(s.getSubmitTime())
-                .endTime(end)
-                .durationSeconds(s.getDuration())
-                .answeredQuestions(s.getAnsweredQuestions())
-                .totalQuestions(s.getTotalQuestions())
-                .completionPercent(s.getCompletionPercent())
-                .tabSwitchCount(s.getTabSwitchCount())
-                .focusLossCount(s.getFocusLossCount())
-                .copyPasteCount(s.getCopyPasteCount())
-                .suspiciousEventCount(s.getSuspiciousEventCount())
-                .deviceType(s.getDeviceType())
-                .deviceLabel(s.getDeviceLabel())
-                .totalScore(totalScore)
-                .writingReviewStatus(review.writingStatus())
-                .speakingReviewStatus(review.speakingStatus())
-                .subjectiveReviewStatus(review.subjectiveStatus())
-                .writingAnswerCount(review.writingTotal())
-                .speakingAnswerCount(review.speakingTotal())
-                .build();
-    }
-
     /**
      * Deletes a submission and removes speaking files from disk. Teacher must own the exam (or admin).
      */
@@ -306,7 +250,7 @@ public class SubmissionService {
                 "You do not have permission to delete this submission"
         );
 
-        List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
+        List<Answer> answers = answerRepository.findBySubmission(submission);
         if (!answers.isEmpty()) {
             feedbackRepository.deleteByAnswerIn(answers);
             aiResultRepository.deleteByAnswerIn(answers);
@@ -369,43 +313,4 @@ public class SubmissionService {
         });
     }
 
-    private record SubmissionReviewOverview(
-            int writingTotal,
-            int writingPublished,
-            int speakingTotal,
-            int speakingPublished
-    ) {
-        static SubmissionReviewOverview empty() {
-            return new SubmissionReviewOverview(0, 0, 0, 0);
-        }
-
-        boolean allSubjectivePublished() {
-            return isPublished(writingTotal, writingPublished) && isPublished(speakingTotal, speakingPublished);
-        }
-
-        String writingStatus() {
-            return status(writingTotal, writingPublished);
-        }
-
-        String speakingStatus() {
-            return status(speakingTotal, speakingPublished);
-        }
-
-        String subjectiveStatus() {
-            int total = writingTotal + speakingTotal;
-            int published = writingPublished + speakingPublished;
-            return status(total, published);
-        }
-
-        private static boolean isPublished(int total, int published) {
-            return total == 0 || published == total;
-        }
-
-        private static String status(int total, int published) {
-            if (total == 0) {
-                return "NOT_REQUIRED";
-            }
-            return published == total ? "PUBLISHED" : "PENDING";
-        }
-    }
 }

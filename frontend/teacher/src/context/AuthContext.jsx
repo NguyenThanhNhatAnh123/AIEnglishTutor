@@ -22,6 +22,7 @@ export function AuthProvider({ children }) {
         email: authData.email,
         fullName: authData.fullName,
         role: authData.role,
+        teacherId: authData.teacherId,
       };
       setUser(u);
       localStorage.setItem('user', JSON.stringify(u));

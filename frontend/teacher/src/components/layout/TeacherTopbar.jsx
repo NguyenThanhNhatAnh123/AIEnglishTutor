@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 const pageLabels = {
   '/dashboard': 'Dashboard',
   '/exams': 'Exams',
+  '/teachers': 'Teachers',
   '/students': 'Students',
   '/analytics': 'Analytics',
   '/questions': 'Question Bank',

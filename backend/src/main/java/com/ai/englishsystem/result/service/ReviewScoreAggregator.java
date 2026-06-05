@@ -46,7 +46,7 @@ public class ReviewScoreAggregator {
     }
 
     private SectionScore calculatePublishedAverage(Submission submission, String questionType) {
-        List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission).stream()
+        List<Answer> answers = answerRepository.findBySubmissionFetchQuestionOnly(submission).stream()
                 .filter(answer -> normalizeType(questionType).equals(normalizeType(
                         answer.getQuestion() != null ? answer.getQuestion().getQuestionType() : null)))
                 .toList();

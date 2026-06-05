@@ -55,7 +55,7 @@ public class ScoreService {
 
     private ScoreResponse toResponse(Score score, boolean studentViewer) {
         Submission submission = score.getSubmission();
-        List<Answer> answers = answerRepository.findBySubmissionFetchQuestion(submission);
+        List<Answer> answers = answerRepository.findBySubmissionFetchQuestionOnly(submission);
         Map<Integer, Feedback> feedbackByAnswerId = feedbackRepository.findByAnswerIn(answers).stream()
                 .filter(f -> f.getAnswer() != null && f.getAnswer().getId() != null)
                 .collect(Collectors.toMap(f -> f.getAnswer().getId(), Function.identity()));

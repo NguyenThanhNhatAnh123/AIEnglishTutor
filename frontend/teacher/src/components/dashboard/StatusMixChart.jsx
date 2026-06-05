@@ -6,7 +6,7 @@ function StatusTooltip({ active, payload }) {
   return (
     <div className="rounded-lg border border-white/80 bg-white/95 px-3 py-2 text-sm shadow-panel">
       <p className="font-semibold text-slate-900">{item.name}</p>
-      <p className="mt-1 text-slate-500">{item.value} attempts</p>
+      <p className="mt-1 text-slate-500">{item.value} lần làm</p>
     </div>
   );
 }
@@ -36,7 +36,7 @@ export default function StatusMixChart({ data, total, passRate }) {
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
           <p className="text-3xl font-bold text-slate-950">{total}</p>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Attempts</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Lần làm</p>
         </div>
       </div>
 
@@ -52,7 +52,7 @@ export default function StatusMixChart({ data, total, passRate }) {
         ))}
         <div className="rounded-lg bg-slate-50 p-3">
           <div className="flex items-center justify-between text-sm">
-            <span className="font-semibold text-slate-600">Pass rate</span>
+            <span className="font-semibold text-slate-600">Tỉ lệ đạt</span>
             <span className="font-bold text-emerald-600">{passRate}%</span>
           </div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">

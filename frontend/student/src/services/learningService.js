@@ -44,15 +44,12 @@ learningApi.interceptors.response.use(
 
 export const learningService = {
   getDecks: (params = {}) => learningApi.get('/learning/decks', { params }),
-  getDeck: (deckId) => learningApi.get(`/learning/decks/${deckId}`),
-  getDeckItems: (deckId) => learningApi.get(`/learning/decks/${deckId}/items`),
   enrollDeck: (deckId) => learningApi.post(`/learning/decks/${deckId}/enroll`),
   getDueReviews: ({ deckId, limit = 20 } = {}) =>
     learningApi.get('/learning/reviews/due', { params: { deckId, limit } }),
   submitReview: ({ itemId, rating, requestId }) =>
     learningApi.post('/learning/reviews', { itemId, rating, requestId }),
   getProgress: () => learningApi.get('/learning/progress'),
-  getDeckProgress: (deckId) => learningApi.get(`/learning/progress/decks/${deckId}`),
 };
 
 export default learningApi;

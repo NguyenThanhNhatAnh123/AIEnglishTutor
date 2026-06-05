@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { studentApi, userApi, roleApi } from '../services/api';
+import { classApi, studentApi } from '../services/api';
 import Layout from '../components/Layout';
 import Modal from '../components/common/Modal';
 import Button from '../components/common/Button';
 import EmptyState from '../components/common/EmptyState';
+import Badge from '../components/common/Badge';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import { useToast } from '../context/ToastContext';
 
@@ -36,7 +37,7 @@ function readPagedData(response) {
   };
 }
 
-function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
+function StudentFormModal({ mode, student, onClose, onSaved }) {
   const toast = useToast();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
@@ -46,7 +47,11 @@ function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
     fullName: student?.fullName || '',
     studentCode: student?.studentCode || '',
     dateOfBirth: student?.dateOfBirth || '',
+    status: student?.status || 'ACTIVE',
+    classIds: [],
   });
+  const [classOptions, setClassOptions] = useState([]);
+  const [loadingClasses, setLoadingClasses] = useState(mode === 'create');
 
   useEffect(() => {
     if (mode === 'edit' && student) {
@@ -57,18 +62,30 @@ function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
         fullName: student.fullName || '',
         studentCode: student.studentCode || '',
         dateOfBirth: student.dateOfBirth || '',
+        status: student.status || 'ACTIVE',
+        classIds: [],
       });
     }
   }, [mode, student]);
+
+  useEffect(() => {
+    if (mode !== 'create') {
+      return;
+    }
+    setLoadingClasses(true);
+    classApi.getAll()
+      .then((response) => {
+        const list = response.data?.data || [];
+        setClassOptions(Array.isArray(list) ? list : []);
+      })
+      .catch(() => setClassOptions([]))
+      .finally(() => setLoadingClasses(false));
+  }, [mode]);
 
   const setField = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (mode === 'create' && !studentRoleId) {
-      toast.error('Student role is not available. Reload the page or contact an administrator.');
-      return;
-    }
     setLoading(true);
     try {
       if (mode === 'create') {
@@ -82,20 +99,20 @@ function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
           setLoading(false);
           return;
         }
-        const userRes = await userApi.create({
+        if (form.classIds.length === 0) {
+          toast.error('Select at least one class for this student.');
+          setLoading(false);
+          return;
+        }
+        await studentApi.create({
           username: form.username.trim(),
           email: form.email.trim(),
           password: form.password,
           fullName: (form.fullName || form.username).trim(),
-          roleId: studentRoleId,
-          status: 'ACTIVE',
-        });
-        const newUserId = userRes.data?.data?.id;
-        if (!newUserId) throw new Error('User create did not return an id');
-        await studentApi.create({
-          userId: newUserId,
           studentCode: form.studentCode.trim(),
           dateOfBirth: form.dateOfBirth || null,
+          status: form.status,
+          classIds: form.classIds,
         });
         toast.success('Student created.');
       } else {
@@ -104,6 +121,7 @@ function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
           email: form.email?.trim() || undefined,
           studentCode: form.studentCode?.trim() || undefined,
           dateOfBirth: form.dateOfBirth || null,
+          status: form.status,
         });
         toast.success('Student updated.');
       }
@@ -143,6 +161,37 @@ function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
           </div>
         </>
       )}
+      {mode === 'create' && (
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Classes *</label>
+          {loadingClasses ? (
+            <div className="text-sm text-slate-400">Loading classes...</div>
+          ) : classOptions.length === 0 ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              Create a class before adding students.
+            </div>
+          ) : (
+            <div className="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3">
+              {classOptions.map((cls) => (
+                <label key={cls.id} className="flex items-center gap-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.classIds.includes(cls.id)}
+                    onChange={() => setForm((current) => ({
+                      ...current,
+                      classIds: current.classIds.includes(cls.id)
+                        ? current.classIds.filter((id) => id !== cls.id)
+                        : [...current.classIds, cls.id],
+                    }))}
+                    className="accent-blue-600"
+                  />
+                  <span>{cls.name}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1">Email *</label>
         <input
@@ -174,6 +223,13 @@ function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
         <label className="block text-sm font-medium text-slate-700 mb-1">Date of birth</label>
         <input type="date" className="w-full px-3 py-2 rounded-xl border border-slate-200" value={form.dateOfBirth || ''} onChange={setField('dateOfBirth')} />
       </div>
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
+        <select className="w-full px-3 py-2 rounded-xl border border-slate-200" value={form.status} onChange={setField('status')}>
+          <option value="ACTIVE">Active</option>
+          <option value="INACTIVE">Inactive</option>
+        </select>
+      </div>
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="secondary" onClick={onClose}>
           Cancel
@@ -189,7 +245,6 @@ function StudentFormModal({ mode, student, studentRoleId, onClose, onSaved }) {
 export default function Students() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [studentRoleId, setStudentRoleId] = useState(null);
   const [modal, setModal] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -199,14 +254,11 @@ export default function Students() {
 
   const load = useCallback(() => {
     setLoading(true);
-    Promise.all([studentApi.getAll({ page, size: STUDENT_PAGE_SIZE }), roleApi.getAll()])
-      .then(([sRes, rolesRes]) => {
+    studentApi.getAll({ page, size: STUDENT_PAGE_SIZE })
+      .then((sRes) => {
         const next = readPagedData(sRes);
         setRows(next.items);
         setPageInfo({ page: next.page, totalPages: next.totalPages, totalItems: next.totalItems });
-        const roles = rolesRes.data?.data || [];
-        const studentRole = roles.find((r) => r.name === 'STUDENT');
-        if (studentRole?.id) setStudentRoleId(studentRole.id);
       })
       .catch(() => {
         setRows([]);
@@ -274,13 +326,14 @@ export default function Students() {
                 </Button>
               </div>
             </div>
-            <table className="w-full text-sm min-w-[640px]">
+            <table className="w-full text-sm min-w-[720px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100">
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Code</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Name</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Username</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Email</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">DOB</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Created</th>
                   <th className="text-right px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Actions</th>
@@ -293,19 +346,23 @@ export default function Students() {
                     <td className="px-4 py-3 font-medium text-slate-800">{s.fullName || '—'}</td>
                     <td className="px-4 py-3 text-slate-500">@{s.username || '—'}</td>
                     <td className="px-4 py-3 text-slate-500 text-xs">{s.email}</td>
+                    <td className="px-4 py-3"><Badge status={s.status || 'ACTIVE'} label={s.status || 'ACTIVE'} /></td>
                     <td className="px-4 py-3 text-slate-500 text-xs">{fmtDate(s.dateOfBirth)}</td>
                     <td className="px-4 py-3 text-slate-400 text-xs">{fmtDate(s.createdAt)}</td>
-                    <td className="px-4 py-3 text-right space-x-2 whitespace-nowrap">
-                      <button
-                        type="button"
-                        className="text-blue-600 text-xs font-semibold hover:underline"
-                        onClick={() => setModal({ mode: 'edit', student: s })}
-                      >
-                        Edit
-                      </button>
-                      <button type="button" className="text-red-600 text-xs font-semibold hover:underline" onClick={() => setDeleteTarget(s)}>
-                        Delete
-                      </button>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setModal({ mode: 'edit', student: s })}
+                        >
+                          Edit
+                        </Button>
+                        <Button type="button" variant="danger" size="sm" onClick={() => setDeleteTarget(s)}>
+                          Delete
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -321,7 +378,6 @@ export default function Students() {
             key={`${modal.mode}-${modal.student?.id ?? 'new'}`}
             mode={modal.mode}
             student={modal.student}
-            studentRoleId={studentRoleId}
             onClose={() => setModal(null)}
             onSaved={() => {
               setModal(null);

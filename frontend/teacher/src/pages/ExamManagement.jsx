@@ -1,14 +1,28 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { classApi, examApi } from '../services/api';
+import { examApi } from '../services/api';
 import Layout from '../components/Layout';
-import ExamSectionsModal from '../components/ExamSectionsModal';
 import Modal from '../components/common/Modal';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import EmptyState from '../components/common/EmptyState';
 import { PageLoader } from '../components/common/LoadingSpinner';
+import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { SECTION_TYPES } from '../../../packages/utils/constants.js';
+
+const SECTION_OPTIONS = Object.values(SECTION_TYPES);
+
+function sectionToForm(section, index = 0) {
+  return {
+    clientId: section?.id ? `section-${section.id}` : `new-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id: section?.id,
+    name: section?.name || '',
+    sectionType: section?.sectionType || SECTION_TYPES.READING,
+    orderIndex: section?.orderIndex ?? index,
+    questionCount: section?.questions?.length ?? section?.questionCount ?? 0,
+  };
+}
 
 function formatExamCreated(value) {
   if (value == null || value === '') return '-';
@@ -26,17 +40,22 @@ function formatExamCreated(value) {
   return '-';
 }
 
-function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
+function ExamFormModal({ exam, classOptions, teacherOptions, onClose, onSuccess }) {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const [form, setForm] = useState({
     title: exam?.title || '',
     description: exam?.description || '',
+    teacherId: exam?.teacherId ? String(exam.teacherId) : (user?.teacherId ? String(user.teacherId) : ''),
     durationMinutes: exam?.durationMinutes || 60,
     status: exam?.status || 'DRAFT',
     examType: exam?.examType || 'PRACTICE',
     maxAttempts: exam?.maxAttempts ?? (exam?.examType === 'OFFICIAL' ? 1 : ''),
     allowedClassIds: Array.isArray(exam?.allowedClasses) ? exam.allowedClasses.map((c) => c.id) : [],
+    sections: Array.isArray(exam?.sections) ? exam.sections.map(sectionToForm) : [],
   });
   const [loading, setLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const toast = useToast();
 
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
@@ -50,6 +69,57 @@ function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
           : [...prev.allowedClassIds, classId],
       };
     });
+  };
+
+  useEffect(() => {
+    if (!exam?.id) return;
+    let alive = true;
+    setDetailLoading(true);
+    examApi
+      .getById(exam.id)
+      .then((r) => {
+        if (!alive) return;
+        const detail = r.data?.data || exam;
+        setForm({
+          title: detail.title || '',
+          description: detail.description || '',
+          teacherId: detail.teacherId ? String(detail.teacherId) : (user?.teacherId ? String(user.teacherId) : ''),
+          durationMinutes: detail.durationMinutes || 60,
+          status: detail.status || 'DRAFT',
+          examType: detail.examType || 'PRACTICE',
+          maxAttempts: detail.maxAttempts ?? (detail.examType === 'OFFICIAL' ? 1 : ''),
+          allowedClassIds: Array.isArray(detail.allowedClasses) ? detail.allowedClasses.map((c) => c.id) : [],
+          sections: Array.isArray(detail.sections) ? detail.sections.map(sectionToForm) : [],
+        });
+      })
+      .catch(() => toast.error('Failed to load exam details.'))
+      .finally(() => {
+        if (alive) setDetailLoading(false);
+      });
+    return () => { alive = false; };
+  }, [exam, toast, user?.teacherId]);
+
+  const addSection = () => {
+    setForm((f) => ({
+      ...f,
+      sections: [...f.sections, sectionToForm({ orderIndex: f.sections.length }, f.sections.length)],
+    }));
+  };
+
+  const updateSection = (clientId, patch) => {
+    setForm((f) => ({
+      ...f,
+      sections: f.sections.map((section) => (
+        section.clientId === clientId ? { ...section, ...patch } : section
+      )),
+    }));
+  };
+
+  const removeSection = (clientId) => {
+    setForm((f) => ({
+      ...f,
+      sections: f.sections.filter((section) => section.clientId !== clientId),
+    }));
   };
 
   const handleSubmit = async (e) => {
@@ -68,13 +138,36 @@ function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
         setLoading(false);
         return;
       }
+      if (form.status === 'ACTIVE' && form.allowedClassIds.length === 0) {
+        toast.error('Select at least one allowed class before publishing.');
+        setLoading(false);
+        return;
+      }
+      const teacherId = parseInt(form.teacherId, 10);
+      if (!teacherId) {
+        toast.error('Please select a teacher.');
+        setLoading(false);
+        return;
+      }
       const payload = {
         ...form,
+        teacherId,
         durationMinutes: parsedDuration,
         examType: form.examType || 'PRACTICE',
         maxAttempts: parsedMaxAttempts,
         allowedClassIds: form.allowedClassIds,
+        sections: form.sections.map((section, index) => ({
+          id: section.id,
+          name: section.name.trim(),
+          sectionType: section.sectionType,
+          orderIndex: Number.isFinite(Number(section.orderIndex)) ? Number(section.orderIndex) : index,
+        })),
       };
+      if (payload.sections.some((section) => !section.name)) {
+        toast.error('Every section needs a name.');
+        setLoading(false);
+        return;
+      }
       if (exam) {
         await examApi.update(exam.id, payload);
         toast.success('Exam updated.');
@@ -91,8 +184,14 @@ function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
     }
   };
 
+  const selectedTeacherId = parseInt(form.teacherId, 10);
+  const visibleClassOptions = Number.isFinite(selectedTeacherId)
+    ? classOptions.filter((cls) => cls.teacherId === selectedTeacherId)
+    : classOptions;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {detailLoading && <PageLoader />}
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">Title</label>
         <input
@@ -112,6 +211,24 @@ function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
           className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-sky-300 resize-none"
         />
       </div>
+      {isAdmin && (
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1.5">Teacher</label>
+          <select
+            value={form.teacherId}
+            onChange={(e) => setForm((prev) => ({ ...prev, teacherId: e.target.value, allowedClassIds: [] }))}
+            required
+            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
+          >
+            <option value="">Select teacher...</option>
+            {teacherOptions.map((teacher) => (
+              <option key={teacher.id} value={teacher.id}>
+                {teacher.fullName || teacher.teacherCode}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">Exam type</label>
         <select
@@ -146,11 +263,11 @@ function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
       </div>
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-1.5">Allowed classes</label>
-        {classOptions.length === 0 ? (
-          <p className="text-xs text-slate-500">No classes available. This exam will be open to all students.</p>
+        {visibleClassOptions.length === 0 ? (
+          <p className="text-xs text-red-600">No classes available. Create a class before publishing this exam.</p>
         ) : (
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 max-h-48 overflow-y-auto space-y-2">
-            {classOptions.map((cls) => (
+            {visibleClassOptions.map((cls) => (
               <label key={cls.id} className="flex items-center gap-2 text-sm text-slate-700">
                 <input
                   type="checkbox"
@@ -164,7 +281,7 @@ function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
           </div>
         )}
         <p className="text-xs text-slate-500 mt-1">
-          If none selected, all students can join this exam.
+          Active exams are visible only to students in the selected classes.
         </p>
       </div>
       <div className="grid grid-cols-2 gap-4">
@@ -192,6 +309,60 @@ function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
           </select>
         </div>
       </div>
+      <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Sections</p>
+            <p className="text-xs text-slate-500">Saved together with the exam.</p>
+          </div>
+          <Button variant="secondary" type="button" size="sm" onClick={addSection}>
+            Add section
+          </Button>
+        </div>
+        {form.sections.length === 0 ? (
+          <p className="text-sm text-slate-400">No sections yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {form.sections.map((section, index) => (
+              <div key={section.clientId} className="grid grid-cols-1 gap-2 rounded-xl border border-slate-100 bg-slate-50 p-3 sm:grid-cols-[80px_150px_1fr_auto]">
+                <input
+                  type="number"
+                  value={section.orderIndex}
+                  onChange={(e) => updateSection(section.clientId, { orderIndex: e.target.value })}
+                  className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm"
+                  aria-label={`Order for section ${index + 1}`}
+                />
+                <select
+                  value={section.sectionType}
+                  onChange={(e) => updateSection(section.clientId, { sectionType: e.target.value })}
+                  className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm"
+                >
+                  {SECTION_OPTIONS.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={section.name}
+                  onChange={(e) => updateSection(section.clientId, { name: e.target.value })}
+                  placeholder="Section name"
+                  className="px-3 py-2 rounded-xl border border-slate-200 bg-white text-sm"
+                />
+                <Button
+                  variant="danger"
+                  type="button"
+                  size="sm"
+                  onClick={() => removeSection(section.clientId)}
+                  disabled={section.questionCount > 0}
+                  title={section.questionCount > 0 ? 'Move or delete questions first' : 'Remove section'}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
       <div className="flex gap-3 justify-end">
         <Button variant="secondary" type="button" onClick={onClose}>Cancel</Button>
         <Button variant="primary" type="submit" loading={loading}>
@@ -203,24 +374,33 @@ function ExamFormModal({ exam, classOptions, onClose, onSuccess }) {
 }
 
 export default function ExamManagement() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const [exams, setExams] = useState([]);
   const [classes, setClasses] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editExam, setEditExam] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [sectionsExam, setSectionsExam] = useState(null);
   const toast = useToast();
 
   const load = () => {
     setLoading(true);
     examApi
-      .getAll()
-      .then((r) => setExams(r.data?.data || []))
+      .workspace()
+      .then((r) => {
+        const data = r.data?.data || {};
+        setExams(data.exams || []);
+        setClasses(data.classes || []);
+        setTeachers(data.teachers || []);
+      })
       .catch((err) => {
         setExams([]);
+        setClasses([]);
+        setTeachers([]);
         const msg = err?.response?.data?.message || 'Failed to load exams.';
         toast.error(msg);
       })
@@ -229,12 +409,8 @@ export default function ExamManagement() {
 
   useEffect(() => {
     load();
-    classApi
-      .getAll()
-      .then((r) => setClasses(r.data?.data || []))
-      .catch(() => setClasses([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initial load only
-  }, []);
+  }, [isAdmin]);
 
   const handleDelete = async () => {
     setDeleteLoading(true);
@@ -271,12 +447,15 @@ export default function ExamManagement() {
     const owner = e.teacherName?.toLowerCase() || '';
     return title.includes(q) || desc.includes(q) || owner.includes(q);
   });
-  const manageable = exams.filter((e) => e.canManage !== false);
-  const activeCount = manageable.filter((e) => e.status === 'ACTIVE').length;
-  const draftCount = manageable.filter((e) => e.status === 'DRAFT').length;
-  const readyCount = manageable.filter((e) => (e.sectionCount ?? 0) > 0 && (e.questionCount ?? 0) > 0).length;
+  const activeCount = exams.filter((e) => e.status === 'ACTIVE').length;
+  const draftCount = exams.filter((e) => e.status === 'DRAFT').length;
+  const readyCount = exams.filter((e) => (e.sectionCount ?? 0) > 0 && (e.questionCount ?? 0) > 0).length;
 
-  const isReady = (exam) => (exam.sectionCount ?? 0) > 0 && (exam.questionCount ?? 0) > 0;
+  const isReady = (exam) =>
+    (exam.sectionCount ?? 0) > 0
+    && (exam.questionCount ?? 0) > 0
+    && Array.isArray(exam.allowedClasses)
+    && exam.allowedClasses.length > 0;
 
   return (
     <Layout>
@@ -292,7 +471,7 @@ export default function ExamManagement() {
             </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[520px]">
               {[
-                ['My exams', manageable.length],
+                ['My exams', exams.length],
                 ['Active', activeCount],
                 ['Draft', draftCount],
                 ['Ready', readyCount],
@@ -368,7 +547,6 @@ export default function ExamManagement() {
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {filtered.map((e) => {
-                  const canManage = e.canManage !== false;
                   const ready = isReady(e);
                   return (
                   <tr key={e.id} className="hover:bg-slate-50 transition-colors">
@@ -378,11 +556,6 @@ export default function ExamManagement() {
                         <p className="text-xs text-slate-500 mt-1 line-clamp-2">{e.description}</p>
                       ) : (
                         <p className="text-xs text-slate-400 mt-1 italic">No description</p>
-                      )}
-                      {!canManage && e.teacherName && (
-                        <p className="text-xs text-amber-700 mt-1.5">
-                          Owner: {e.teacherName} (view only)
-                        </p>
                       )}
                     </td>
                     <td className="px-4 py-3 align-top">
@@ -427,47 +600,35 @@ export default function ExamManagement() {
                     </td>
                     <td className="px-4 py-3 text-right align-top">
                       <div className="flex flex-wrap items-center justify-end gap-2">
-                        {canManage && e.status === 'DRAFT' && (
+                        {e.status === 'DRAFT' && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handlePublish(e)}
                             disabled={!ready}
-                            title={ready ? 'Publish this exam' : 'Add sections and questions before publishing'}
+                            title={ready ? 'Publish this exam' : 'Add sections, questions, and at least one class before publishing'}
                           >
                             Publish
                           </Button>
                         )}
-                        {canManage && (
-                          <Button variant="ghost" size="sm" onClick={() => setSectionsExam(e)}>
-                            Sections
-                          </Button>
-                        )}
-                        {canManage && (
-                          <Link
-                            to={`/questions?examId=${e.id}`}
-                            className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg text-slate-700 hover:bg-slate-100 transition-colors"
-                          >
+                        <Button
+                          as={Link}
+                          to={`/questions?examId=${e.id}`}
+                          variant="secondary"
+                          size="sm"
+                        >
                             Questions
-                          </Link>
-                        )}
-                        {canManage && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => { setEditExam(e); setShowForm(true); }}
-                          >
-                            Edit
-                          </Button>
-                        )}
-                        {canManage && (
-                          <Button variant="danger" size="sm" onClick={() => setDeleteTarget(e)}>
-                            Delete
-                          </Button>
-                        )}
-                        {!canManage && (
-                          <span className="text-xs text-slate-400">-</span>
-                        )}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => { setEditExam(e); setShowForm(true); }}
+                        >
+                          Edit
+                        </Button>
+                        <Button variant="danger" size="sm" onClick={() => setDeleteTarget(e)}>
+                          Delete
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -484,28 +645,15 @@ export default function ExamManagement() {
         isOpen={showForm}
         onClose={() => setShowForm(false)}
         title={editExam ? 'Edit Exam' : 'Create Exam'}
+        maxWidth="max-w-3xl"
       >
         <ExamFormModal
           exam={editExam}
           classOptions={classes}
+          teacherOptions={teachers}
           onClose={() => setShowForm(false)}
           onSuccess={() => { setShowForm(false); load(); }}
         />
-      </Modal>
-
-      <Modal
-        isOpen={!!sectionsExam}
-        onClose={() => setSectionsExam(null)}
-        title="Exam sections"
-        maxWidth="max-w-3xl"
-      >
-        {sectionsExam && (
-          <ExamSectionsModal
-            examId={sectionsExam.id}
-            examTitle={sectionsExam.title}
-            onChanged={load}
-          />
-        )}
       </Modal>
 
       <Modal

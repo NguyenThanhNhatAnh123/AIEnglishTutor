@@ -20,8 +20,6 @@ import {
   Progress,
 } from '../components/ui/shadcn';
 
-const ANSWER_BATCH_SIZE = 100;
-
 function formatDurationSeconds(sec) {
   if (sec == null || Number.isNaN(sec)) return '-';
   const n = Math.max(0, Math.floor(sec));
@@ -798,16 +796,19 @@ export default function StudentResults() {
   useEffect(() => {
     if (!selectedExamId || loadedExamId === selectedExamId) return;
     let cancelled = false;
-    submissionApi.getByExamId(parseInt(selectedExamId))
+    submissionApi.workspace(parseInt(selectedExamId, 10))
       .then((r) => {
         if (!cancelled) {
-          setSubmissions(r.data?.data || []);
+          const data = r.data?.data || {};
+          setSubmissions(data.submissions || []);
+          setAnswerMap(data.answersBySubmissionId || {});
           setLoadedExamId(selectedExamId);
         }
       })
       .catch((err) => {
         if (!cancelled) {
           setSubmissions([]);
+          setAnswerMap({});
           setLoadedExamId(selectedExamId);
         }
         if (err.response?.status === 403) {
@@ -819,33 +820,6 @@ export default function StudentResults() {
   }, [loadedExamId, selectedExamId]);
 
   const loadingSubs = Boolean(selectedExamId) && loadedExamId !== selectedExamId;
-
-  useEffect(() => {
-    if (!submissions.length) {
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const ids = submissions.map((s) => s.id).filter(Boolean);
-        const nextAnswerMap = {};
-        for (let i = 0; i < ids.length; i += ANSWER_BATCH_SIZE) {
-          if (cancelled) return;
-          const chunk = ids.slice(i, i + ANSWER_BATCH_SIZE);
-          const r = await submissionApi.getAnswersBatch(chunk);
-          Object.assign(nextAnswerMap, r.data?.data || {});
-        }
-        if (!cancelled) setAnswerMap(nextAnswerMap);
-      } catch {
-        if (!cancelled) {
-          const fallback = {};
-          submissions.forEach((s) => { fallback[s.id] = []; });
-          setAnswerMap(fallback);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [submissions]);
 
   const filtered = submissions
     .filter((s) => {
@@ -989,9 +963,8 @@ export default function StudentResults() {
                     <td className="px-4 py-3 text-right space-x-1">
                       <Button variant="ghost" size="sm" onClick={() => setSelectedSub(s)}>View</Button>
                       <Button
-                        variant="ghost"
+                        variant="danger"
                         size="sm"
-                        className="text-red-600"
                         onClick={() => setDeleteConfirm({ isOpen: true, submissionId: s.id })}
                       >
                         Delete

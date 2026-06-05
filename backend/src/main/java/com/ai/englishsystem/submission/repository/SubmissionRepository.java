@@ -18,8 +18,6 @@ import java.util.List;
 import java.util.Optional;
 
 public interface SubmissionRepository extends JpaRepository<Submission, Integer> {
-    List<Submission> findByStudent(Student student);
-
     List<Submission> findByExam(Exam exam);
 
     @EntityGraph(attributePaths = {"exam", "student", "student.user", "examAttempt"})
@@ -29,14 +27,6 @@ public interface SubmissionRepository extends JpaRepository<Submission, Integer>
             ORDER BY COALESCE(s.endTime, s.submitTime, s.startTime) DESC, s.id DESC
             """)
     List<Submission> findByExamOrderByLatestWorkDateDesc(@Param("exam") Exam exam);
-
-    @EntityGraph(attributePaths = {"exam", "student", "student.user", "examAttempt"})
-    @Query("""
-            SELECT s FROM Submission s
-            WHERE s.exam.id IN :examIds
-            ORDER BY COALESCE(s.endTime, s.submitTime, s.startTime) DESC, s.id DESC
-            """)
-    List<Submission> findByExamIdInOrderByLatestWorkDateDesc(@Param("examIds") Collection<Integer> examIds);
 
     void deleteByExam(Exam exam);
 
@@ -63,12 +53,6 @@ public interface SubmissionRepository extends JpaRepository<Submission, Integer>
     @EntityGraph(attributePaths = {"exam", "student", "student.user"})
     @Query("SELECT s FROM Submission s WHERE s.student = :student ORDER BY s.startTime DESC")
     List<Submission> findByStudentOrderByStartTimeDesc(@Param("student") Student student);
-
-    boolean existsByExam_IdAndStudent_IdAndStatusIn(
-            Integer examId,
-            Integer studentId,
-            Collection<SubmissionStatus> statuses
-    );
 
     long countByExam_IdAndStudent_IdAndStatusIn(
             Integer examId,

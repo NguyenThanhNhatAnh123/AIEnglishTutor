@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { submissionApi, studentApi } from '../services/api';
+import { authApi, submissionApi, studentApi } from '../services/api';
+import { useToast } from '../context/ToastContext';
 import Badge from '../components/common/Badge';
+import Button from '../components/common/Button';
 import { PageLoader } from '../components/common/LoadingSpinner';
 import EmptyState from '../components/common/EmptyState';
 
@@ -45,9 +47,12 @@ function fmtDateTime(value) {
 
 export default function Profile() {
   const { user } = useAuth();
+  const toast = useToast();
   const [submissions, setSubmissions] = useState([]);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [changingPassword, setChangingPassword] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,6 +84,27 @@ export default function Profile() {
   const displayUsername = user?.username;
   const studentCode = profile?.studentCode;
   const createdAt = profile?.createdAt;
+  const setPasswordField = (field) => (event) => {
+    setPasswordForm((current) => ({ ...current, [field]: event.target.value }));
+  };
+
+  const submitPasswordChange = async (event) => {
+    event.preventDefault();
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      toast.error('Password confirmation does not match.');
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await authApi.changePassword(passwordForm);
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      toast.success('Password changed.');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Could not change password.');
+    } finally {
+      setChangingPassword(false);
+    }
+  };
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -135,6 +161,44 @@ export default function Profile() {
           </p>
         )}
       </div>
+
+      <form className="card space-y-3" onSubmit={submitPasswordChange}>
+        <h3 className="section-title">Change password</h3>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <input
+            type="password"
+            autoComplete="current-password"
+            placeholder="Current password"
+            value={passwordForm.currentPassword}
+            onChange={setPasswordField('currentPassword')}
+            className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            required
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder="New password"
+            minLength={6}
+            value={passwordForm.newPassword}
+            onChange={setPasswordField('newPassword')}
+            className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            required
+          />
+          <input
+            type="password"
+            autoComplete="new-password"
+            placeholder="Confirm password"
+            minLength={6}
+            value={passwordForm.confirmPassword}
+            onChange={setPasswordField('confirmPassword')}
+            className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            required
+          />
+        </div>
+        <div className="flex justify-end">
+          <Button type="submit" variant="primary" loading={changingPassword}>Update password</Button>
+        </div>
+      </form>
 
       <div className="grid grid-cols-3 gap-4">
         <div className="card text-center">

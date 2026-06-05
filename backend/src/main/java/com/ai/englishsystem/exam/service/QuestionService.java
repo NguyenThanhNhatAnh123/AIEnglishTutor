@@ -5,7 +5,6 @@ import com.ai.englishsystem.common.exception.ForbiddenException;
 import com.ai.englishsystem.common.exception.NotFoundException;
 import com.ai.englishsystem.common.util.SecurityUtils;
 import com.ai.englishsystem.exam.dto.QuestionOptionRequest;
-import com.ai.englishsystem.exam.dto.QuestionOptionResponse;
 import com.ai.englishsystem.exam.dto.QuestionRequest;
 import com.ai.englishsystem.exam.dto.QuestionResponse;
 import com.ai.englishsystem.exam.entity.Exam;
@@ -13,6 +12,7 @@ import com.ai.englishsystem.exam.entity.ExamSection;
 import com.ai.englishsystem.exam.entity.ExamSectionType;
 import com.ai.englishsystem.exam.entity.Question;
 import com.ai.englishsystem.exam.entity.QuestionOption;
+import com.ai.englishsystem.exam.mapper.QuestionMapper;
 import com.ai.englishsystem.exam.repository.ExamRepository;
 import com.ai.englishsystem.exam.repository.ExamSectionRepository;
 import com.ai.englishsystem.exam.repository.QuestionRepository;
@@ -24,27 +24,32 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class QuestionService {
+    private static final int MAX_BULK_QUESTIONS = 200;
 
     private final QuestionRepository questionRepository;
     private final ExamSectionRepository examSectionRepository;
     private final ExamRepository examRepository;
+    private final QuestionMapper questionMapper;
 
     @Transactional(readOnly = true)
     public List<QuestionResponse> findAll(Integer examId) {
         if (SecurityUtils.hasRole("ADMIN")) {
             if (examId != null) {
                 return questionRepository.findByExamId(examId).stream()
-                        .map(this::toResponse)
+                        .map(questionMapper::toResponse)
                         .collect(Collectors.toList());
             }
             return questionRepository.findAllWithAssociations().stream()
-                    .map(this::toResponse)
+                    .map(questionMapper::toResponse)
                     .collect(Collectors.toList());
         }
         if (!SecurityUtils.hasRole("TEACHER")) {
@@ -55,12 +60,12 @@ public class QuestionService {
                     .orElseThrow(() -> new NotFoundException("Exam", examId));
             assertExamOwnerOrAdmin(exam);
             return questionRepository.findByExamId(examId).stream()
-                    .map(this::toResponse)
+                    .map(questionMapper::toResponse)
                     .collect(Collectors.toList());
         }
         Integer userId = SecurityUtils.getCurrentUserId();
         return questionRepository.findByTeacherUserId(userId).stream()
-                .map(this::toResponse)
+                .map(questionMapper::toResponse)
                 .collect(Collectors.toList());
     }
 
@@ -69,10 +74,10 @@ public class QuestionService {
         if (SecurityUtils.hasRole("ADMIN")) {
             if (examId != null) {
                 return questionRepository.findByExamId(examId, pageable)
-                        .map(this::toResponse);
+                        .map(questionMapper::toResponse);
             }
             return questionRepository.findAllWithAssociations(pageable)
-                    .map(this::toResponse);
+                    .map(questionMapper::toResponse);
         }
         if (!SecurityUtils.hasRole("TEACHER")) {
             throw new ForbiddenException("Access denied");
@@ -82,11 +87,11 @@ public class QuestionService {
                     .orElseThrow(() -> new NotFoundException("Exam", examId));
             assertExamOwnerOrAdmin(exam);
             return questionRepository.findByExamId(examId, pageable)
-                    .map(this::toResponse);
+                    .map(questionMapper::toResponse);
         }
         Integer userId = SecurityUtils.getCurrentUserId();
         return questionRepository.findByTeacherUserId(userId, pageable)
-                .map(this::toResponse);
+                .map(questionMapper::toResponse);
     }
 
     @Transactional
@@ -94,7 +99,10 @@ public class QuestionService {
         ExamSection section = examSectionRepository.findById(request.getSectionId())
                 .orElseThrow(() -> new NotFoundException("Exam section", request.getSectionId()));
         assertSectionOwnerOrAdmin(section);
+        return createInSection(request, section);
+    }
 
+    private QuestionResponse createInSection(QuestionRequest request, ExamSection section) {
         String qType = request.getQuestionType() != null
                 ? request.getQuestionType().trim().toUpperCase()
                 : "MULTIPLE_CHOICE";
@@ -104,18 +112,17 @@ public class QuestionService {
                 .section(section)
                 .questionText(request.getQuestionText().trim())
                 .questionType(qType)
-                .points(request.getPoints() != null ? request.getPoints() : 1)
+                .points(resolvePoints(request.getPoints()))
                 .listeningAudioUrl(trimToNull(request.getListeningAudioUrl()))
                 .transcript(request.getTranscript())
                 .minWords(request.getMinWords())
                 .maxWords(request.getMaxWords())
                 .build();
 
-        question = questionRepository.save(question);
         attachOptions(question, request.getOptions());
         question = questionRepository.save(question);
 
-        return toResponse(question);
+        return questionMapper.toResponse(question);
     }
 
     @Transactional
@@ -123,8 +130,25 @@ public class QuestionService {
         if (requests == null || requests.isEmpty()) {
             throw new BadRequestException("questions must contain at least one item");
         }
+        if (requests.size() > MAX_BULK_QUESTIONS) {
+            throw new BadRequestException("Bulk create supports at most " + MAX_BULK_QUESTIONS + " questions at once");
+        }
+        Set<Integer> sectionIds = requests.stream()
+                .map(QuestionRequest::getSectionId)
+                .collect(Collectors.toSet());
+        if (sectionIds.contains(null)) {
+            throw new BadRequestException("Each question must include sectionId");
+        }
+
+        Map<Integer, ExamSection> sectionsById = examSectionRepository.findAllById(sectionIds).stream()
+                .collect(Collectors.toMap(ExamSection::getId, Function.identity()));
+        if (sectionsById.size() != sectionIds.size()) {
+            throw new NotFoundException("One or more exam sections were not found");
+        }
+        sectionsById.values().forEach(this::assertSectionOwnerOrAdmin);
+
         List<QuestionResponse> created = requests.stream()
-                .map(this::create)
+                .map(request -> createInSection(request, sectionsById.get(request.getSectionId())))
                 .collect(Collectors.toList());
         log.info("Bulk question create success: count={}", created.size());
         return created;
@@ -158,7 +182,7 @@ public class QuestionService {
         question.setQuestionType(qType);
 
         if (request.getPoints() != null) {
-            question.setPoints(request.getPoints());
+            question.setPoints(resolvePoints(request.getPoints()));
         }
         if (request.getListeningAudioUrl() != null) {
             question.setListeningAudioUrl(trimToNull(request.getListeningAudioUrl()));
@@ -179,7 +203,7 @@ public class QuestionService {
         }
 
         question = questionRepository.save(question);
-        return toResponse(question);
+        return questionMapper.toResponse(question);
     }
 
     @Transactional
@@ -227,6 +251,16 @@ public class QuestionService {
         }
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    private int resolvePoints(Integer points) {
+        if (points == null) {
+            return 1;
+        }
+        if (points < 1) {
+            throw new BadRequestException("points must be at least 1");
+        }
+        return points;
     }
 
     private void attachOptions(Question question, List<QuestionOptionRequest> optionRequests) {
@@ -340,35 +374,5 @@ public class QuestionService {
             throw new BadRequestException("Section is not linked to an exam");
         }
         assertExamOwnerOrAdmin(section.getExam());
-    }
-
-    private QuestionResponse toResponse(Question question) {
-        ExamSection section = question.getSection();
-        Exam exam = section != null ? section.getExam() : null;
-        return QuestionResponse.builder()
-                .id(question.getId())
-                .sectionId(section != null ? section.getId() : null)
-                .sectionName(section != null ? section.getName() : null)
-                .sectionType(section != null && section.getSectionType() != null
-                        ? section.getSectionType().name() : null)
-                .examId(exam != null ? exam.getId() : null)
-                .examTitle(exam != null ? exam.getTitle() : null)
-                .questionText(question.getQuestionText())
-                .questionType(question.getQuestionType())
-                .listeningAudioUrl(question.getListeningAudioUrl())
-                .transcript(question.getTranscript())
-                .points(question.getPoints())
-                .minWords(question.getMinWords())
-                .maxWords(question.getMaxWords())
-                .createdAt(question.getCreatedAt())
-                .options(question.getOptions() == null ? List.of()
-                        : question.getOptions().stream()
-                        .map(o -> QuestionOptionResponse.builder()
-                                .id(o.getId())
-                                .optionText(o.getOptionText())
-                                .isCorrect(o.getIsCorrect())
-                                .build())
-                        .collect(Collectors.toList()))
-                .build();
     }
 }
